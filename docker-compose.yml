@@ -1,0 +1,16 @@
+services:
+  insta:
+    build: .
+    container_name: insta-app
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: 3100
+      LIVE_AUDIT_ASSETS_DIR: /app/public/assets/live-audit
+    ports:
+      - "127.0.0.1:3100:3100"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./public/assets/live-audit:/app/public/assets/live-audit:ro

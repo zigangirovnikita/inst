@@ -1,0 +1,10 @@
+.env
+.git
+.gitignore
+.DS_Store
+node_modules
+data
+logs
+graphify-out
+*.sqlite
+*.log

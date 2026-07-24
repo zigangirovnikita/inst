@@ -1,0 +1,13 @@
+{
+  "name": "instagram-audit",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Instagram profile audit and sales funnel simulator",
+  "engines": {
+    "node": ">=22.5.0 <25"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js && node --check services/*.js && node --check public/*.js"
+  }
+}
