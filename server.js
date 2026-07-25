@@ -245,13 +245,21 @@ function liveAuditFallbackSvg(name) {
   </svg>`;
 }
 
+function tinyFaviconSvg() {
+  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#111114"/><circle cx="32" cy="32" r="20" fill="none" stroke="#f0b54d" stroke-width="6"/><path d="M32 17v16h14" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+}
+
+function thumbnailFallbackSvg() {
+  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 560" width="360" height="560"><defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#211d27"/><stop offset="1" stop-color="#111114"/></linearGradient></defs><rect width="360" height="560" rx="18" fill="url(#bg)"/><rect x="38" y="48" width="284" height="464" rx="22" fill="none" stroke="#4f465a" stroke-width="3"/><circle cx="180" cy="240" r="52" fill="none" stroke="#f0b54d" stroke-width="9"/><path d="M180 188v52l38 22" fill="none" stroke="#fff" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/><text x="180" y="346" text-anchor="middle" fill="#c9c7d0" font-family="Arial, sans-serif" font-size="22" font-weight="700">Reels загружен</text><text x="180" y="380" text-anchor="middle" fill="#8f8798" font-family="Arial, sans-serif" font-size="17">превью недоступно</text></svg>';
+}
+
 function isInstagramCdnUrl(value) {
   try { const url = new URL(value); return url.protocol === 'https:' && (url.hostname.endsWith('.cdninstagram.com') || url.hostname.endsWith('.fbcdn.net')); } catch { return false; }
 }
 
 async function sendThumbnail(res, imageUrls) {
   const urls = imageUrls.filter(isInstagramCdnUrl);
-  if (!urls.length) { res.writeHead(400); return res.end(); }
+  if (!urls.length) { res.writeHead(200, { 'content-type': 'image/svg+xml; charset=utf-8', 'cache-control': 'private, max-age=300' }); return res.end(thumbnailFallbackSvg()); }
   for (const imageUrl of urls) {
     try {
       const upstream = await fetch(imageUrl, { headers: { accept: 'image/avif,image/webp,image/*,*/*;q=0.8', referer: 'https://www.instagram.com/', 'user-agent': 'Mozilla/5.0 AppleWebKit/537.36 Chrome/138 Safari/537.36' }, signal: AbortSignal.timeout(15000) });
@@ -262,13 +270,15 @@ async function sendThumbnail(res, imageUrls) {
       return res.end(image);
     } catch {}
   }
-  res.writeHead(404); res.end();
+  res.writeHead(200, { 'content-type': 'image/svg+xml; charset=utf-8', 'cache-control': 'private, max-age=300' });
+  res.end(thumbnailFallbackSvg());
 }
 
 const server = http.createServer(async (req, res) => {
   securityHeaders(res);
   const requestUrl = new URL(req.url, 'http://localhost');
   if (req.method === 'GET' && requestUrl.pathname === '/') return sendIndex(res);
+  if (req.method === 'GET' && requestUrl.pathname === '/favicon.ico') { res.writeHead(200, { 'content-type': 'image/svg+xml; charset=utf-8', 'cache-control': 'public, max-age=86400' }); return res.end(tinyFaviconSvg()); }
   if (req.method === 'GET' && requestUrl.pathname === '/glass-signal.css') { res.writeHead(200, { 'content-type': 'text/css; charset=utf-8', 'cache-control': 'no-cache' }); return res.end(fs.readFileSync(path.join(__dirname, 'public', 'glass-signal.css'))); }
   if (req.method === 'GET' && requestUrl.pathname === '/design-concepts') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); return res.end(fs.readFileSync(path.join(__dirname, 'public', 'design-concepts.html'))); }
   if (req.method === 'GET' && requestUrl.pathname === '/admin') {
