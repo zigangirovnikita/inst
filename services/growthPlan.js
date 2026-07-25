@@ -1,6 +1,6 @@
 const POLZA_URL = 'https://api.polza.ai/api/v1/chat/completions';
 const MODEL = 'google/gemini-3.5-flash-lite';
-const VERSION = 15;
+const VERSION = 16;
 
 function parseJson(content) {
   const text = String(content || '').trim().replace(/^\`\`\`json\s*|\s*\`\`\`$/g, '');
@@ -57,9 +57,9 @@ Examples of the required specificity and format (adapt them; do not copy them bl
 
 Do not reveal a full content plan, product ladder, finished offer, funnel copy, or lead magnet. Those are intentionally reserved for a live diagnostic. Do not promise sales or revenue. The tone is direct, useful, and confident, not promotional.
 
-For liveReview, give exactly FOUR concrete bullets adapted to the selected funnel and the user's business. Write every bullet from the position "what Nikita will do on the live review" using Russian third-person future verbs: "Подготовит", "Опишет", "Определит", "Оценит".
+For liveReview, give exactly FOUR concrete bullets adapted to the selected funnel and the user's business. This text is shown directly under the heading "Что Никита сделает на разборе для вас", so every bullet MUST describe what Nikita will do, not what the user should do. Write every bullet in Russian third-person future form using these starting verbs in this order: "Подготовит", "Опишет", "Определит", "Оценит".
 The four bullets MUST follow these skeletons:
-1) "Подготовит 7-дневный контент-план на основе успешных рилс русских и зарубежных [competitor category]." The competitor category MUST be named from the supplied niche/product/audience, for example "психологов по отношениям". Do not write generic "конкурентов" if a concrete category can be derived.
+1) "Подготовит 7-дневный контент-план на основе успешных рилс русских и зарубежных [competitor category]." The competitor category MUST be named from the supplied niche/product/audience, for example "психологов по отношениям", "экспертов по наставничеству", or "нутрициологов для женщин 35+". Do not write generic "конкурентов", "экспертов" or "прямых конкурентов" if a concrete category can be derived. If the source data is broad, still infer the safest category from the user's niche/audience/product and keep it commercially plausible.
 2) "Опишет..." the funnel stage sequence and the offers/scripts needed at each stage; name the selected route stages, for example Reels, code word, AI bot, lesson, tripwire, Direct messages, application, call.
 3) "Определит..." which target-audience segment will buy, which segment will not buy, and how to attract/qualify the buying segment; adapt this to the user's declared target audience.
 4) "Оценит..." implementation time and required costs/resources so the user does not pay for unnecessary tools or build ineffective steps.

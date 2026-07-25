@@ -38,38 +38,16 @@
     return '<div class="media-grid ' + type + '">' + images.map(([name, alt]) => '<button class="media-button" data-image="' + esc(asset(name)) + '" data-alt="' + esc(alt) + '"><img src="' + esc(asset(name)) + '" alt="' + esc(alt) + '" width="800" height="1000" loading="lazy"></button>').join('') + '</div>';
   }
 
-  function cleanText(value) {
-    return String(value || '').trim().replace(/\s+/g, ' ').replace(/[.;:]+$/g, '');
-  }
-
-  function competitorGroup(points) {
-    const fromBullet = cleanText(points?.[0]).match(/адаптировать темы под ([^.]+)$/i)?.[1];
-    const answers = state.analysis?.answers || state.answers || {};
-    return cleanText(fromBullet || answers.audience || answers.niche || 'экспертов в вашей нише').toLowerCase();
-  }
-
-  function actionPoint(value) {
-    const text = cleanText(value);
-    return text
-      .replace(/^подготовить\b/i, 'Подготовит')
-      .replace(/^описать\b/i, 'Опишет')
-      .replace(/^определить\b/i, 'Определит')
-      .replace(/^оценить\b/i, 'Оценит') + '.';
-  }
-
   function auditPoints() {
     const fromPlan = state.analysis?.growthPlan?.liveReview?.bullets;
     const selectedRoute = state.analysis?.funnelPlan?.best?.title;
-    const sourcePoints = Array.isArray(fromPlan) && fromPlan.length >= 3 ? fromPlan : selectedRoute ? [
+    if (Array.isArray(fromPlan) && fromPlan.length >= 3) return fromPlan;
+    return selectedRoute ? [
       defaultAuditPoints[0],
       'Опишет поэтапную воронку и офферы каждого этапа: ' + selectedRoute + '.',
       'Определит, кто из вашей аудитории будет покупать, кто не будет, и как привлекать нужных людей.',
       defaultAuditPoints[3],
     ] : defaultAuditPoints;
-    return [
-      'Подготовит 7-дневный контент-план на основе успешных рилс русских и зарубежных ' + competitorGroup(sourcePoints) + '.',
-      ...sourcePoints.slice(1, 4).map(actionPoint),
-    ];
   }
 
   function bindLightbox() {
@@ -99,7 +77,7 @@
     document.querySelector('#back-to-live-audit').onclick = () => { state.screen = 'liveAudit'; persist(); render(); };
     document.querySelector('#lead-form').onsubmit = async event => {
       event.preventDefault(); const form = event.currentTarget; const submit = document.querySelector('#submit-lead'); const status = document.querySelector('#lead-status');
-      const values = Object.fromEntries(new FormData(form).entries()); submit.disabled = true; submit.textContent = 'Отправляем…'; status.textContent = '';
+      const values = Object.fromEntries(new FormData(form).entries()); values.clientId = clientId(); submit.disabled = true; submit.textContent = 'Отправляем…'; status.textContent = '';
       try { await api('/api/analyses/' + state.analysisId + '/lead', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(values) }); state.screen = 'leadSuccess'; persist(); render(); }
       catch (error) { submit.disabled = false; submit.textContent = 'Отправить заявку'; status.textContent = error.message; }
     };
