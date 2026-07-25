@@ -132,7 +132,7 @@ function getAnalysis(analysisId) {
   if (!row) return null;
   const reels = database.prepare('SELECT reel_json FROM reels WHERE analysis_id=? ORDER BY reel_index').all(analysisId).map(item => JSON.parse(item.reel_json));
   return {
-    analysisId: row.id, profileUrl: row.profile_url, status: row.status, contentStatus: row.content_status, errorStatus: row.error_status,
+    analysisId: row.id, clientId: row.client_id, profileUrl: row.profile_url, status: row.status, contentStatus: row.content_status, errorStatus: row.error_status,
     profile: row.profile_json ? JSON.parse(row.profile_json) : null, reels, answers: row.answers_json ? JSON.parse(row.answers_json) : null,
     errorAnalysis: row.error_analysis_json ? JSON.parse(row.error_analysis_json) : null,
     funnelPlan: row.funnel_plan_json ? JSON.parse(row.funnel_plan_json) : null, error: row.error_message,
@@ -143,30 +143,65 @@ function getAnalysis(analysisId) {
 
 function getAdminSummary() {
   const stages = [
-    ['start', 'Вход'],
-    ['questions', 'Вопросы'],
-    ['profile', 'Профиль / Reels'],
-    ['errors', 'Анализ ошибок'],
-    ['funnelResult', 'Расчет воронки'],
-    ['growthPlan', 'План на 30 дней'],
-    ['liveAudit', 'Живой разбор'],
-    ['leadForm', 'Форма заявки'],
-    ['leadSuccess', 'Спасибо после заявки'],
+    { screen: 'start', label: 'Вход', aliases: [] },
+    { screen: 'questions', label: 'Вопросы', aliases: [] },
+    { screen: 'profile', label: 'Профиль / Reels', aliases: [] },
+    { screen: 'errors', label: 'Анализ ошибок', aliases: [] },
+    { screen: 'funnelResult', label: 'Расчет воронки', aliases: ['funnelLoading'] },
+    { screen: 'growthPlan', label: 'План на 30 дней', aliases: ['growthPlanLoading'] },
+    { screen: 'liveAudit', label: 'Живой разбор', aliases: [] },
+    { screen: 'leadForm', label: 'Форма заявки', aliases: [] },
+    { screen: 'leadSuccess', label: 'Спасибо после заявки', aliases: ['leadSubmitted'] },
   ];
-  const screenRows = database.prepare(`
-    SELECT screen, COUNT(DISTINCT COALESCE(NULLIF(client_id, ''), analysis_id)) AS people
+
+  const stageByScreen = new Map();
+  stages.forEach((stage, index) => {
+    stageByScreen.set(stage.screen, index);
+    stage.aliases.forEach(alias => stageByScreen.set(alias, index));
+  });
+  const reachedByPerson = new Map();
+  const markReached = (person, stageIndex) => {
+    if (!person || stageIndex === undefined) return;
+    reachedByPerson.set(person, Math.max(reachedByPerson.get(person) ?? 0, stageIndex));
+  };
+
+  database.prepare(`
+    SELECT COALESCE(NULLIF(client_id, ''), analysis_id) AS person, screen
     FROM funnel_events
-    GROUP BY screen
-  `).all();
-  const byScreen = new Map(screenRows.map(row => [row.screen, row.people]));
+    WHERE COALESCE(NULLIF(client_id, ''), analysis_id) IS NOT NULL
+  `).all().forEach(row => markReached(row.person, stageByScreen.get(row.screen)));
+
+  database.prepare(`
+    SELECT COALESCE(NULLIF(client_id, ''), id) AS person,
+      answers_json,
+      profile_json,
+      error_analysis_json,
+      funnel_plan_json,
+      growth_plan_json
+    FROM analyses
+  `).all().forEach(row => {
+    markReached(row.person, 0);
+    if (row.answers_json) markReached(row.person, 1);
+    if (row.profile_json) markReached(row.person, 2);
+    if (row.error_analysis_json) markReached(row.person, 3);
+    if (row.funnel_plan_json) markReached(row.person, 4);
+    if (row.growth_plan_json) markReached(row.person, 5);
+  });
+
+  database.prepare(`
+    SELECT COALESCE(NULLIF(a.client_id, ''), l.analysis_id) AS person
+    FROM lead_requests l
+    LEFT JOIN analyses a ON a.id = l.analysis_id
+  `).all().forEach(row => markReached(row.person, stages.length - 1));
+
   const leadPeople = database.prepare(`
     SELECT COUNT(DISTINCT COALESCE(NULLIF(a.client_id, ''), l.analysis_id)) AS people
     FROM lead_requests l
     LEFT JOIN analyses a ON a.id = l.analysis_id
   `).get().people || 0;
   const totalLeads = database.prepare('SELECT COUNT(*) AS total FROM lead_requests').get().total || 0;
-  const rows = stages.map(([screen, label], index) => {
-    const people = screen === 'leadSuccess' ? Math.max(byScreen.get(screen) || 0, leadPeople) : byScreen.get(screen) || 0;
+  const rows = stages.map(({ screen, label }, index) => {
+    const people = [...reachedByPerson.values()].filter(maxStage => maxStage >= index).length;
     const previousPeople = index ? null : people;
     return { screen, label, people, previousPeople };
   });
