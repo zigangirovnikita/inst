@@ -7,7 +7,7 @@ const DAILY_CALL_CAPACITY = 6;
 const MONTHLY_CHAT_CAPACITY = DAILY_CHAT_CAPACITY * SIMULATION_DAYS;
 const MONTHLY_CALL_CAPACITY = DAILY_CALL_CAPACITY * SIMULATION_DAYS;
 const DIRECT_TRIPWIRE_990_RATE = 0.15;
-const VERSION = 13;
+const VERSION = 14;
 const PRICE_POINTS = [4_000, 9_000, 19_000, 29_000, 49_000, 60_000, 100_000, 150_000];
 
 const MATERIALS = {
@@ -84,15 +84,16 @@ function botPopulation(stages, bot, flow) {
   add(stages, botName(bot), people, bot === 'ai' ? 'Отвечает на кодовые слова и отвлечённые вопросы' : 'Ведёт только написавших кодовое слово');
   return people;
 }
-function closeChat(stages, candidates, price) {
+function closeChat(stages, candidates, price, rateMultiplier = 1) {
   const requested = whole(candidates);
   const handled = Math.min(requested, MONTHLY_CHAT_CAPACITY);
   const lost = requested - handled;
-  const sales = whole(handled * chatRate(price));
+  const rate = Math.min(0.35, chatRate(price) * rateMultiplier);
+  const sales = whole(handled * rate);
   add(stages, 'Запросили ручную переписку', requested);
   add(stages, 'Получили своевременный ответ', handled, `Лимит: ${DAILY_CHAT_CAPACITY} переписок в день · ${MONTHLY_CHAT_CAPACITY} за ${SIMULATION_DAYS} дней`);
   if (lost) add(stages, 'Остыли без своевременного ответа', lost);
-  add(stages, 'Продали в переписке', sales, `${Math.round(chatRate(price) * 100)}% обработанных переписок`);
+  add(stages, 'Продали в переписке', sales, `${Math.round(rate * 100)}% обработанных переписок`);
   return { ...emptyResult(), chatRequested: requested, chatsHandled: handled, chatSales: sales, lost };
 }
 function closeCalls(stages, candidates, price, applicationsReady = false, manualIntake = false) {
@@ -118,8 +119,8 @@ function closeCalls(stages, candidates, price, applicationsReady = false, manual
   add(stages, 'Продали на созвоне', sales, `${Math.round(rates.sale * 100)}% состоявшихся созвонов`);
   return { ...emptyResult(), callApplications: applications, calls, callSales: sales, lost };
 }
-function handleSimpleBotOffTopic(stages, flow) {
-  const handled = Math.min(flow.offTopic, MONTHLY_CHAT_CAPACITY);
+function handleSimpleBotOffTopic(stages, flow, capacity = MONTHLY_CHAT_CAPACITY) {
+  const handled = Math.min(flow.offTopic, Math.max(0, capacity));
   const lost = flow.offTopic - handled;
   add(stages, 'Отвлечённые вопросы получили ручной ответ', handled, `Лимит: ${DAILY_CHAT_CAPACITY} переписок в день · ${MONTHLY_CHAT_CAPACITY} за ${SIMULATION_DAYS} дней`);
   if (lost) add(stages, 'Отвлечённые вопросы остыли без ответа', lost);
@@ -162,7 +163,12 @@ function botDirectRoute(bot, productPrice, method) {
   const population = botPopulation(stages, bot, flow);
   const warm = whole(population * (bot === 'ai' ? 0.30 : 0.25));
   add(stages, 'Квалифицированы ботом', warm, `${bot === 'ai' ? 30 : 25}% вошедших в бот`);
-  const result = method === 'chat' ? closeChat(stages, warm + (bot === 'simple' ? flow.offTopic : 0), productPrice) : combine(closeCalls(stages, warm, productPrice), bot === 'simple' ? handleSimpleBotOffTopic(stages, flow) : emptyResult());
+  if (method === 'chat') {
+    const chat = closeChat(stages, warm, productPrice, bot === 'ai' ? 1.18 : 1.08);
+    const offTopic = bot === 'simple' ? handleSimpleBotOffTopic(stages, flow, MONTHLY_CHAT_CAPACITY - chat.chatsHandled) : emptyResult();
+    return finish({ id: `${bot}_direct_${method}`, title: `${botName(bot)} → переписка`, stages, productPrice, result: combine(chat, offTopic), note: 'Без бесплатного материала: бот сразу квалифицирует человека для продажи.' });
+  }
+  const result = combine(closeCalls(stages, warm, productPrice), bot === 'simple' ? handleSimpleBotOffTopic(stages, flow) : emptyResult());
   return finish({ id: `${bot}_direct_${method}`, title: `${botName(bot)} → ${method === 'chat' ? 'переписка' : 'созвон'}`, stages, productPrice, result, note: 'Без бесплатного материала: бот сразу квалифицирует человека для продажи.' });
 }
 function materialRoute(bot, materialId, productPrice, answers, method, selling = false) {
@@ -179,8 +185,9 @@ function materialRoute(bot, materialId, productPrice, answers, method, selling =
   add(stages, 'Узнали цену', priced, '45% активных после материала');
   const auto = selling ? autoSales(stages, priced, directPurchaseRate('material', bot, productPrice, answers)) : emptyResult();
   if (method === 'chat') {
-    const chat = closeChat(stages, whole(active * 0.35) + (bot === 'simple' ? flow.offTopic : 0), productPrice);
-    return finish({ id: `${bot}_${selling ? 'selling_' : ''}${materialId}_chat`, title: `${botName(bot)} → ${contentName}${selling ? ' → покупка / переписка' : ''}`, stages, productPrice, result: combine(auto, chat), note: selling ? 'Автопокупки и продажи из переписки показаны раздельно.' : 'Материал прогревает и ведёт только в переписку; прямой оффер отсутствует.' });
+    const chat = closeChat(stages, whole(active * 0.35), productPrice, bot === 'ai' ? 1.35 : 1.22);
+    const offTopic = bot === 'simple' ? handleSimpleBotOffTopic(stages, flow, MONTHLY_CHAT_CAPACITY - chat.chatsHandled) : emptyResult();
+    return finish({ id: `${bot}_${selling ? 'selling_' : ''}${materialId}_chat`, title: `${botName(bot)} → ${contentName}${selling ? ' → покупка / переписка' : ''}`, stages, productPrice, result: combine(auto, chat, offTopic), note: selling ? 'Автопокупки и продажи из переписки показаны раздельно.' : 'Материал прогревает и ведёт только в переписку; прямой оффер отсутствует.' });
   }
   const calls = closeCalls(stages, whole(active * 0.20), productPrice);
   const result = combine(calls, bot === 'simple' ? handleSimpleBotOffTopic(stages, flow) : emptyResult());
@@ -200,8 +207,9 @@ function lessonRoute(bot, productPrice, answers, method, selling = false) {
   const auto = selling ? autoSales(stages, priced, directPurchaseRate('lesson', bot, productPrice, answers)) : emptyResult();
   const contentName = selling ? 'продающий урок' : `урок для ${method === 'chat' ? 'переписки' : 'созвона'}`;
   if (method === 'chat') {
-    const chat = closeChat(stages, whole((priced - auto.automaticSales) * 0.20) + (bot === 'simple' ? flow.offTopic : 0), productPrice);
-    return finish({ id: `${bot}_${selling ? 'selling_lesson' : 'lesson'}_chat`, title: `${botName(bot)} → ${contentName}${selling ? ' → покупка / переписка' : ''}`, stages, productPrice, result: combine(auto, chat), note: selling ? (bot === 'ai' && productPrice === 15_000 ? 'Для автопокупки использована фактическая конверсия продающего ИИ-урока: 45,2% после узнавания цены.' : 'Автопокупки после продающего урока плавно снижаются с ростом чека.') : 'Обычный урок прогревает и ведёт в переписку; прямой оффер отсутствует.' });
+    const chat = closeChat(stages, whole((priced - auto.automaticSales) * 0.20), productPrice, bot === 'ai' ? 1.65 : 1.42);
+    const offTopic = bot === 'simple' ? handleSimpleBotOffTopic(stages, flow, MONTHLY_CHAT_CAPACITY - chat.chatsHandled) : emptyResult();
+    return finish({ id: `${bot}_${selling ? 'selling_lesson' : 'lesson'}_chat`, title: `${botName(bot)} → ${contentName}${selling ? ' → покупка / переписка' : ''}`, stages, productPrice, result: combine(auto, chat, offTopic), note: selling ? (bot === 'ai' && productPrice === 15_000 ? 'Для автопокупки использована фактическая конверсия продающего ИИ-урока: 45,2% после узнавания цены.' : 'Автопокупки после продающего урока плавно снижаются с ростом чека.') : 'Обычный урок прогревает и ведёт в переписку; прямой оффер отсутствует.' });
   }
   const calls = closeCalls(stages, priced - auto.automaticSales, productPrice);
   const result = combine(calls, bot === 'simple' ? handleSimpleBotOffTopic(stages, flow) : emptyResult());
@@ -222,8 +230,9 @@ function webinarRoute(bot, productPrice, answers, method, selling = false) {
   const auto = selling ? autoSales(stages, priced, directPurchaseRate('webinar', bot, productPrice, answers)) : emptyResult();
   const contentName = selling ? 'продающий вебинар' : `вебинар для ${method === 'chat' ? 'переписки' : 'созвона'}`;
   if (method === 'chat') {
-    const chat = closeChat(stages, whole(attendees * 0.15) + (bot === 'simple' ? flow.offTopic : 0), productPrice);
-    return finish({ id: `${bot}_${selling ? 'selling_webinar' : 'webinar'}_chat`, title: `${botName(bot)} → ${contentName}${selling ? ' → покупка / переписка' : ''}`, stages, productPrice, result: combine(auto, chat), note: selling ? 'Автопокупки и продажи из переписки показаны раздельно.' : 'Обычный вебинар прогревает и ведёт в переписку; прямой оффер отсутствует.' });
+    const chat = closeChat(stages, whole(attendees * 0.15), productPrice, bot === 'ai' ? 1.78 : 1.52);
+    const offTopic = bot === 'simple' ? handleSimpleBotOffTopic(stages, flow, MONTHLY_CHAT_CAPACITY - chat.chatsHandled) : emptyResult();
+    return finish({ id: `${bot}_${selling ? 'selling_webinar' : 'webinar'}_chat`, title: `${botName(bot)} → ${contentName}${selling ? ' → покупка / переписка' : ''}`, stages, productPrice, result: combine(auto, chat, offTopic), note: selling ? 'Автопокупки и продажи из переписки показаны раздельно.' : 'Обычный вебинар прогревает и ведёт в переписку; прямой оффер отсутствует.' });
   }
   const calls = closeCalls(stages, priced - auto.automaticSales, productPrice);
   const result = combine(calls, bot === 'simple' ? handleSimpleBotOffTopic(stages, flow) : emptyResult());
