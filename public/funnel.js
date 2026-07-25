@@ -1,5 +1,5 @@
 (function funnelScreen() {
-  const PLAN_VERSION = 19;
+  const PLAN_VERSION = 20;
   const number = value => new Intl.NumberFormat('ru-RU').format(Math.round(value || 0));
   const percent = value => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 }).format(value);
   const esc = value => String(value || '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char]));
@@ -50,6 +50,7 @@
       + '<div class="funnel-business-row"><span>Потеряно/остыло</span><b>' + number(summary.lostInquiries) + ' обращений</b></div>'
       + '<div class="funnel-business-row"><span>Упущенная выручка против лучшего варианта</span><b>' + number(summary.missedRevenue) + ' ₽</b></div>'
       + '<div class="funnel-business-row"><span>Нагрузка</span><b>' + esc(summary.load) + '</b></div>'
+      + '<div class="funnel-business-row"><span>Автооплаты</span><b>' + esc(summary.automaticPaymentText || 'Все продажи ты проводишь самостоятельно.') + '</b></div>'
       + '<div class="funnel-business-row funnel-burnout ' + burnoutClass(burnout.level) + '"><span>Риск выгорания</span><b>' + esc(burnout.level) + '</b></div>'
       + '</div>';
   }

@@ -8,7 +8,7 @@ const MANUAL_CHAT_CAPACITY = DAILY_CHAT_CAPACITY * SIMULATION_DAYS;
 const MANUAL_CALL_CAPACITY = DAILY_CALL_CAPACITY * SIMULATION_DAYS;
 const DIRECT_TRIPWIRE_990_RATE = 0.15;
 const WEBINAR_AUTO_PURCHASE_RATE = 0.08;
-const VERSION = 19;
+const VERSION = 20;
 const PRICE_POINTS = [4_000, 9_000, 19_000, 29_000, 49_000, 60_000, 100_000, 150_000];
 
 const MATERIALS = {
@@ -161,13 +161,13 @@ function scenarioComplexity(id) {
   if (id.includes('tripwire')) return 7;
   return 4;
 }
-function finish({ id, title, stages, productPrice, result, tripwireRevenue = 0, note }) {
+function finish({ id, title, stages, productPrice, result, tripwireRevenue = 0, tripwirePurchases = 0, note }) {
   const mainProductSales = result.automaticSales + result.chatSales + result.callSales;
   const mainProductRevenue = mainProductSales * productPrice;
   return {
     id, title, name: title, stages, productPrice, mainProductSales, mainProductRevenue: money(mainProductRevenue), tripwireRevenue: money(tripwireRevenue),
     revenue: money(mainProductRevenue + tripwireRevenue), lostLeads: result.lost, calls: result.calls,
-    complexity: scenarioComplexity(id), salesBreakdown: { automatic: result.automaticSales, chat: result.chatSales, call: result.callSales },
+    complexity: scenarioComplexity(id), salesBreakdown: { automatic: result.automaticSales, chat: result.chatSales, call: result.callSales, tripwire: tripwirePurchases },
     flow: { chatsRequested: result.chatRequested, chatsHandled: result.chatsHandled, callApplications: result.callApplications, callsHeld: result.calls, lost: result.lost }, note,
   };
 }
@@ -193,6 +193,7 @@ function addBusinessSummary(scenarios, maxRevenue) {
   return scenarios.map(item => {
     const totalInquiries = whole(START_VIEWS * INBOX_RATE);
     const processedInquiries = Math.max(0, totalInquiries - item.flow.lost);
+    const automaticPayments = (item.salesBreakdown.automatic || 0) + (item.salesBreakdown.tripwire || 0);
     return {
       ...item,
       businessSummary: {
@@ -201,6 +202,8 @@ function addBusinessSummary(scenarios, maxRevenue) {
         totalInquiries,
         lostInquiries: item.flow.lost,
         missedRevenue: Math.max(0, maxRevenue.revenue - item.revenue),
+        automaticPayments,
+        automaticPaymentText: automaticPayments ? `Пришло оплат без вашего участия: ${number(automaticPayments)}` : 'Все продажи ты проводишь самостоятельно.',
         load: loadText(item.flow, item.id),
         burnout: burnout(item.flow, item.id),
       },
@@ -311,7 +314,7 @@ function tripwireRoute(bot, productPrice, tripwirePrice, afterLesson) {
   add(stages, 'Потребили трипваер', consumed, '70% покупателей');
   add(stages, 'Оставили заявку на личную консультацию', applications, '20% потребивших');
   const result = combine(closeCalls(stages, applications, productPrice, true), bot === 'simple' ? handleSimpleBotOffTopic(stages, flow) : emptyResult());
-  return finish({ id: `${bot}_tripwire_${afterLesson ? 'lesson_' : 'direct_'}${tripwirePrice}`, title: `${botName(bot)} → ${afterLesson ? 'урок → ' : ''}трипваер ${number(tripwirePrice)} ₽ → консультация`, stages, productPrice, result, tripwireRevenue: buyers * tripwirePrice, note: afterLesson ? 'Трипваер дороже 990 ₽ предлагается только после урока.' : 'Прямое предложение из бота разрешено только для трипваера за 990 ₽.' });
+  return finish({ id: `${bot}_tripwire_${afterLesson ? 'lesson_' : 'direct_'}${tripwirePrice}`, title: `${botName(bot)} → ${afterLesson ? 'урок → ' : ''}трипваер ${number(tripwirePrice)} ₽ → консультация`, stages, productPrice, result, tripwireRevenue: buyers * tripwirePrice, tripwirePurchases: buyers, note: afterLesson ? 'Трипваер дороже 990 ₽ предлагается только после урока.' : 'Прямое предложение из бота разрешено только для трипваера за 990 ₽.' });
 }
 function tripwireRoutes(bot, answers, productPrice) {
   if (productPrice <= 10_000) return [];
