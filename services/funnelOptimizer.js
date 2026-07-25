@@ -1,13 +1,13 @@
 const START_VIEWS = 1_000_000;
-const RESPONSE_WINDOW_DAYS = 3;
+const SIMULATION_DAYS = 30;
 const INBOX_RATE = 0.005;
 const CODEWORD_SHARE = 0.7;
 const DAILY_CHAT_CAPACITY = 30;
-const DAILY_CALL_CAPACITY = 6;
-const MANUAL_CHAT_CAPACITY = DAILY_CHAT_CAPACITY * RESPONSE_WINDOW_DAYS;
-const MANUAL_CALL_CAPACITY = DAILY_CALL_CAPACITY * RESPONSE_WINDOW_DAYS;
+const DAILY_CALL_CAPACITY = 5;
+const MANUAL_CHAT_CAPACITY = DAILY_CHAT_CAPACITY * SIMULATION_DAYS;
+const MANUAL_CALL_CAPACITY = DAILY_CALL_CAPACITY * SIMULATION_DAYS;
 const DIRECT_TRIPWIRE_990_RATE = 0.15;
-const VERSION = 16;
+const VERSION = 17;
 const PRICE_POINTS = [4_000, 9_000, 19_000, 29_000, 49_000, 60_000, 100_000, 150_000];
 
 const MATERIALS = {
@@ -24,8 +24,16 @@ const whole = value => Math.max(0, Math.floor(value));
 const money = value => Math.round(value);
 const number = value => value.toLocaleString('ru-RU');
 const add = (stages, label, people, note = '') => stages.push({ label, people: whole(people), note });
+const sum = values => values.reduce((total, value) => total + value, 0);
 const priceOf = answers => Math.max(0, Number(String(answers.price || '').replace(/[^\d]/g, '')) || 0);
 const botName = bot => bot === 'ai' ? 'ИИ-бот' : 'Обычный бот';
+
+function distribute(total, days = SIMULATION_DAYS) {
+  const value = whole(total);
+  const base = Math.floor(value / days);
+  const rest = value % days;
+  return Array.from({ length: days }, (_, index) => base + (index < rest ? 1 : 0));
+}
 
 function interpolate(price, values) {
   if (price <= PRICE_POINTS[0]) return values[0];
@@ -72,8 +80,8 @@ function combine(...results) { return results.reduce((total, item) => Object.fro
 function inbox(stages) {
   const total = whole(START_VIEWS * INBOX_RATE);
   const codewords = whole(total * CODEWORD_SHARE);
-  add(stages, 'Reels залетел', START_VIEWS, 'Сценарий: завтра один ролик набрал миллион просмотров');
-  add(stages, 'Написали в Direct за 3 дня', total, '0,5% от просмотров');
+  add(stages, 'Reels за месяц', START_VIEWS, `В среднем ${number(whole(START_VIEWS / SIMULATION_DAYS))} просмотров в день`);
+  add(stages, 'Написали в Direct за месяц', total, '0,5% от просмотров · каждый день считается отдельно');
   add(stages, 'Написали кодовое слово', codewords, '70% входящих сообщений');
   add(stages, 'Задали отвлечённый вопрос', total - codewords, '30% входящих сообщений');
   return { total, codewords, offTopic: total - codewords };
@@ -85,12 +93,14 @@ function botPopulation(stages, bot, flow) {
 }
 function closeChat(stages, candidates, price, rateMultiplier = 1) {
   const requested = whole(candidates);
-  const handled = Math.min(requested, MANUAL_CHAT_CAPACITY);
+  const requestedDaily = distribute(requested);
+  const handledDaily = requestedDaily.map(value => Math.min(value, DAILY_CHAT_CAPACITY));
+  const handled = sum(handledDaily);
   const lost = requested - handled;
   const rate = Math.min(0.35, chatRate(price) * rateMultiplier);
   const sales = whole(handled * rate);
   add(stages, 'Запросили ручную переписку', requested);
-  add(stages, 'Получили своевременный ответ', handled, `Лимит: ${DAILY_CHAT_CAPACITY} переписок в день · ${MANUAL_CHAT_CAPACITY} за ${RESPONSE_WINDOW_DAYS} дня`);
+  add(stages, 'Получили своевременный ответ', handled, `Лимит: ${DAILY_CHAT_CAPACITY} переписок в день · без переноса на следующий день`);
   if (lost) add(stages, 'Остыли без своевременного ответа', lost);
   add(stages, 'Продали в переписке', sales, `${Math.round(rate * 100)}% обработанных переписок`);
   return { ...emptyResult(), chatRequested: requested, chatsHandled: handled, chatSales: sales, lost };
@@ -98,30 +108,38 @@ function closeChat(stages, candidates, price, rateMultiplier = 1) {
 function closeCalls(stages, candidates, price, applicationsReady = false, manualIntake = false) {
   let eligible = whole(candidates);
   let lost = 0;
+  let eligibleDaily = distribute(eligible);
   if (manualIntake) {
-    const handled = Math.min(eligible, MANUAL_CHAT_CAPACITY);
+    const handledDaily = eligibleDaily.map(value => Math.min(value, DAILY_CHAT_CAPACITY));
+    const handled = sum(handledDaily);
     lost += eligible - handled;
     eligible = handled;
-    add(stages, 'Получили своевременный первый ответ', handled, `Лимит: ${DAILY_CHAT_CAPACITY} переписок в день · ${MANUAL_CHAT_CAPACITY} за ${RESPONSE_WINDOW_DAYS} дня`);
+    eligibleDaily = handledDaily;
+    add(stages, 'Получили своевременный первый ответ', handled, `Лимит: ${DAILY_CHAT_CAPACITY} переписок в день · без переноса на следующий день`);
     if (lost) add(stages, 'Остыли без своевременного ответа', lost);
   }
   const rates = callRates(price);
-  const applications = applicationsReady ? eligible : whole(eligible * rates.application);
+  const applicationsDaily = applicationsReady ? eligibleDaily : eligibleDaily.map(value => value * rates.application);
+  const applications = whole(sum(applicationsDaily));
   if (!applicationsReady) add(stages, 'Оставили заявку на созвон', applications, `${Math.round(rates.application * 100)}% тёплых лидов`);
-  const slots = Math.min(applications, MANUAL_CALL_CAPACITY);
-  lost += applications - slots;
-  add(stages, 'Получили слот на созвон', slots, `Лимит: ${DAILY_CALL_CAPACITY} созвонов в день · ${MANUAL_CALL_CAPACITY} за ${RESPONSE_WINDOW_DAYS} дня`);
+  const slotsDaily = applicationsDaily.map(value => Math.min(value, DAILY_CALL_CAPACITY));
+  const slots = whole(sum(slotsDaily));
+  lost += whole(sum(applicationsDaily.map((value, index) => Math.max(0, value - slotsDaily[index]))));
+  add(stages, 'Получили слот на созвон', slots, `Лимит: ${DAILY_CALL_CAPACITY} созвонов в день · без переноса на следующий день`);
   if (applications > slots) add(stages, 'Не попали на созвон из-за лимита', applications - slots);
-  const calls = whole(slots * rates.show);
+  const calls = whole(sum(slotsDaily.map(value => value * rates.show)));
   const sales = whole(calls * rates.sale);
   add(stages, 'Созвон состоялся', calls, `${Math.round(rates.show * 100)}% записавшихся`);
   add(stages, 'Продали на созвоне', sales, `${Math.round(rates.sale * 100)}% состоявшихся созвонов`);
   return { ...emptyResult(), callApplications: applications, calls, callSales: sales, lost };
 }
-function handleSimpleBotOffTopic(stages, flow, capacity = MANUAL_CHAT_CAPACITY) {
-  const handled = Math.min(flow.offTopic, Math.max(0, capacity));
+function handleSimpleBotOffTopic(stages, flow, priorChatCandidates = 0) {
+  const offTopicDaily = distribute(flow.offTopic);
+  const priorDaily = distribute(priorChatCandidates);
+  const handledDaily = offTopicDaily.map((value, index) => Math.min(value, Math.max(0, DAILY_CHAT_CAPACITY - Math.min(priorDaily[index], DAILY_CHAT_CAPACITY))));
+  const handled = sum(handledDaily);
   const lost = flow.offTopic - handled;
-  add(stages, 'Отвлечённые вопросы получили ручной ответ', handled, `Лимит: ${DAILY_CHAT_CAPACITY} переписок в день · ${MANUAL_CHAT_CAPACITY} за ${RESPONSE_WINDOW_DAYS} дня`);
+  add(stages, 'Отвлечённые вопросы получили ручной ответ', handled, `Оставшаяся ручная ёмкость после продающих переписок`);
   if (lost) add(stages, 'Отвлечённые вопросы остыли без ответа', lost);
   return { ...emptyResult(), chatsHandled: handled, lost };
 }
@@ -165,7 +183,7 @@ function botDirectRoute(bot, productPrice, method) {
   add(stages, 'Квалифицированы ботом', warm, `${bot === 'ai' ? 30 : 25}% вошедших в бот`);
   if (method === 'chat') {
     const chat = closeChat(stages, warm, productPrice, bot === 'ai' ? 1.18 : 1.08);
-    const offTopic = bot === 'simple' ? handleSimpleBotOffTopic(stages, flow, MANUAL_CHAT_CAPACITY - chat.chatsHandled) : emptyResult();
+    const offTopic = bot === 'simple' ? handleSimpleBotOffTopic(stages, flow, warm) : emptyResult();
     return finish({ id: `${bot}_direct_${method}`, title: `${botName(bot)} → переписка`, stages, productPrice, result: combine(chat, offTopic), note: 'Без бесплатного материала: бот сразу квалифицирует человека для продажи.' });
   }
   const result = combine(closeCalls(stages, warm, productPrice), bot === 'simple' ? handleSimpleBotOffTopic(stages, flow) : emptyResult());
@@ -186,7 +204,8 @@ function materialRoute(bot, materialId, productPrice, answers, method, selling =
   const auto = selling ? autoSales(stages, priced, directPurchaseRate('material', bot, productPrice, answers)) : emptyResult();
   if (method === 'chat') {
     const chat = closeChat(stages, whole(active * 0.35), productPrice, bot === 'ai' ? 1.35 : 1.22);
-    const offTopic = bot === 'simple' ? handleSimpleBotOffTopic(stages, flow, MANUAL_CHAT_CAPACITY - chat.chatsHandled) : emptyResult();
+    const chatCandidates = whole(active * 0.35);
+    const offTopic = bot === 'simple' ? handleSimpleBotOffTopic(stages, flow, chatCandidates) : emptyResult();
     return finish({ id: `${bot}_${selling ? 'selling_' : ''}${materialId}_chat`, title: `${botName(bot)} → ${contentName}${selling ? ' → покупка / переписка' : ''}`, stages, productPrice, result: combine(auto, chat, offTopic), note: selling ? 'Автопокупки и продажи из переписки показаны раздельно.' : 'Материал прогревает и ведёт только в переписку; прямой оффер отсутствует.' });
   }
   const calls = closeCalls(stages, whole(active * 0.20), productPrice);
@@ -208,7 +227,8 @@ function lessonRoute(bot, productPrice, answers, method, selling = false) {
   const contentName = selling ? 'продающий урок' : `урок для ${method === 'chat' ? 'переписки' : 'созвона'}`;
   if (method === 'chat') {
     const chat = closeChat(stages, whole((priced - auto.automaticSales) * 0.20), productPrice, bot === 'ai' ? 1.65 : 1.42);
-    const offTopic = bot === 'simple' ? handleSimpleBotOffTopic(stages, flow, MANUAL_CHAT_CAPACITY - chat.chatsHandled) : emptyResult();
+    const chatCandidates = whole((priced - auto.automaticSales) * 0.20);
+    const offTopic = bot === 'simple' ? handleSimpleBotOffTopic(stages, flow, chatCandidates) : emptyResult();
     return finish({ id: `${bot}_${selling ? 'selling_lesson' : 'lesson'}_chat`, title: `${botName(bot)} → ${contentName}${selling ? ' → покупка / переписка' : ''}`, stages, productPrice, result: combine(auto, chat, offTopic), note: selling ? (bot === 'ai' && productPrice === 15_000 ? 'Для автопокупки использована фактическая конверсия продающего ИИ-урока: 45,2% после узнавания цены.' : 'Автопокупки после продающего урока плавно снижаются с ростом чека.') : 'Обычный урок прогревает и ведёт в переписку; прямой оффер отсутствует.' });
   }
   const calls = closeCalls(stages, priced - auto.automaticSales, productPrice);
@@ -231,7 +251,8 @@ function webinarRoute(bot, productPrice, answers, method, selling = false) {
   const contentName = selling ? 'продающий вебинар' : `вебинар для ${method === 'chat' ? 'переписки' : 'созвона'}`;
   if (method === 'chat') {
     const chat = closeChat(stages, whole(attendees * 0.15), productPrice, bot === 'ai' ? 1.78 : 1.52);
-    const offTopic = bot === 'simple' ? handleSimpleBotOffTopic(stages, flow, MANUAL_CHAT_CAPACITY - chat.chatsHandled) : emptyResult();
+    const chatCandidates = whole(attendees * 0.15);
+    const offTopic = bot === 'simple' ? handleSimpleBotOffTopic(stages, flow, chatCandidates) : emptyResult();
     return finish({ id: `${bot}_${selling ? 'selling_webinar' : 'webinar'}_chat`, title: `${botName(bot)} → ${contentName}${selling ? ' → покупка / переписка' : ''}`, stages, productPrice, result: combine(auto, chat, offTopic), note: selling ? 'Автопокупки и продажи из переписки показаны раздельно.' : 'Обычный вебинар прогревает и ведёт в переписку; прямой оффер отсутствует.' });
   }
   const calls = closeCalls(stages, priced - auto.automaticSales, productPrice);
@@ -304,7 +325,7 @@ function optimiseFunnel(answers) {
     { key: 'recommended', label: 'Оптимальный сейчас', description: 'Баланс выручки, сложности запуска и ручной нагрузки.', scenario: recommended },
     { key: 'maxRevenue', label: 'Лучший по выручке', description: 'Максимальная выручка в модели, даже если запуск сложнее.', scenario: maxRevenue },
   ];
-  return { version: VERSION, startViews: START_VIEWS, simulationDays: RESPONSE_WINDOW_DAYS, responseWindowDays: RESPONSE_WINDOW_DAYS, inboxRate: INBOX_RATE, codewordShare: CODEWORD_SHARE, dailyChatCapacity: DAILY_CHAT_CAPACITY, manualChatCapacity: MANUAL_CHAT_CAPACITY, monthlyChatCapacity: MANUAL_CHAT_CAPACITY, dailyCallCapacity: DAILY_CALL_CAPACITY, manualCallCapacity: MANUAL_CALL_CAPACITY, monthlyCallCapacity: MANUAL_CALL_CAPACITY, productPrice, evaluatedVariants: scenarios.length, scenarios, choices, alternatives: choices.slice(1).map(choice => choice.scenario), selectedChoiceKey: choices.find(choice => choice.scenario.id === recommended.id)?.key || choices[0].key, selectedScenarioId: recommended.id, best: recommended };
+  return { version: VERSION, startViews: START_VIEWS, simulationDays: SIMULATION_DAYS, staleAfterDays: 1, dailyViews: whole(START_VIEWS / SIMULATION_DAYS), inboxRate: INBOX_RATE, codewordShare: CODEWORD_SHARE, dailyChatCapacity: DAILY_CHAT_CAPACITY, manualChatCapacity: MANUAL_CHAT_CAPACITY, monthlyChatCapacity: MANUAL_CHAT_CAPACITY, dailyCallCapacity: DAILY_CALL_CAPACITY, manualCallCapacity: MANUAL_CALL_CAPACITY, monthlyCallCapacity: MANUAL_CALL_CAPACITY, productPrice, evaluatedVariants: scenarios.length, scenarios, choices, alternatives: choices.slice(1).map(choice => choice.scenario), selectedChoiceKey: choices.find(choice => choice.scenario.id === recommended.id)?.key || choices[0].key, selectedScenarioId: recommended.id, best: recommended };
 }
 
 module.exports = { optimiseFunnel, VERSION };
