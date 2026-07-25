@@ -7,7 +7,8 @@ const DAILY_CALL_CAPACITY = 5;
 const MANUAL_CHAT_CAPACITY = DAILY_CHAT_CAPACITY * SIMULATION_DAYS;
 const MANUAL_CALL_CAPACITY = DAILY_CALL_CAPACITY * SIMULATION_DAYS;
 const DIRECT_TRIPWIRE_990_RATE = 0.15;
-const VERSION = 17;
+const WEBINAR_AUTO_PURCHASE_RATE = 0.08;
+const VERSION = 18;
 const PRICE_POINTS = [4_000, 9_000, 19_000, 29_000, 49_000, 60_000, 100_000, 150_000];
 
 const MATERIALS = {
@@ -57,6 +58,7 @@ function callRates(price) {
   };
 }
 function directPurchaseRate(tool, bot, price, answers) {
+  if (tool === 'webinar') return WEBINAR_AUTO_PURCHASE_RATE;
   if (price >= 100_000 || (isMentoring(answers) && price >= 50_000)) return 0;
   const rates = {
     material: [0.20, 0.16, 0.12, 0.09, 0.06, 0.04, 0, 0],

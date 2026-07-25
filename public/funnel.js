@@ -1,5 +1,5 @@
 (function funnelScreen() {
-  const PLAN_VERSION = 17;
+  const PLAN_VERSION = 18;
   const number = value => new Intl.NumberFormat('ru-RU').format(Math.round(value || 0));
   const percent = value => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 1 }).format(value);
   const esc = value => String(value || '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char]));
