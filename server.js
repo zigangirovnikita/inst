@@ -60,6 +60,7 @@ function mapReel(item) {
   return {
     id: first(item.id || item.shortCode || item.shortcode), url: first(item.url || item.postUrl || item.webUrl), caption: first(item.caption || item.text || item.description),
     thumbnailUrl: first(item.displayUrl || item.thumbnailUrl || item.videoThumbnailUrl || item.imageUrl || item.images?.[0]), thumbnailFallbackUrl: first(item.images?.[0]),
+    isPinned: Boolean(item.isPinned || item.pinned || item.isPinnedPost),
     videoUrl: first(item.videoUrl), timestamp: toDate(item), likesCount: first(item.likesCount || item.likes), commentsCount: first(item.commentsCount || item.comments),
     videoViewCount: first(item.videoViewCount || item.videoPlayCount || item.viewsCount || item.viewCount), sharesCount: first(item.sharesCount || item.shareCount || item.reshareCount, null),
     savesCount: first(item.savesCount || item.saveCount || item.bookmarkCount, null), videoDuration: first(item.videoDuration || item.duration),
@@ -89,10 +90,12 @@ async function collectContent(analysisId, profileUrl, log) {
   try {
     const [details, reels] = await Promise.all([
       runActor({ resultsType: 'details', directUrls: [profileUrl], resultsLimit: 1 }, log, 'apify_profile'),
-      runActor({ resultsType: 'reels', directUrls: [profileUrl], resultsLimit: 6 }, log, 'apify_reels'),
+      runActor({ resultsType: 'reels', directUrls: [profileUrl], resultsLimit: 12 }, log, 'apify_reels'),
     ]);
     const profile = mapProfile(details[0] || {}, profileUrl);
-    const reelItems = reels.map(mapReel).sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0)).slice(0, 6);
+    const mappedReels = reels.map(mapReel);
+    const latestRegular = mappedReels.filter(reel => !reel.isPinned).sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0)).slice(0, 6);
+    const reelItems = latestRegular.length >= 6 ? latestRegular : mappedReels.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0)).slice(0, 6);
     const analysedReels = await analyseReels(reelItems, POLZA_AI_TOKEN, log);
     saveContent(analysisId, profile, analysedReels);
     log('content_collection_completed', { durationMs: Date.now() - startedAt, reelsCount: analysedReels.length });

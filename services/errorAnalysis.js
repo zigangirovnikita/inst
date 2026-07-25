@@ -36,6 +36,7 @@ function sourceData(profile, reels, answers) {
     reels: reels.map((reel, index) => ({
       reelNumber: index + 1,
       publishedAt: reel.timestamp,
+      isPinned: Boolean(reel.isPinned),
       content: {
         whatHappensInVideo: reel.analysis?.videoDescription || '',
         transcript: reel.analysis?.transcript || '',
@@ -78,7 +79,7 @@ Methodology:
 - Relevant existing keys are not “wrong” merely because there are several of them. If they can be improved, call them “less relevant or less frequent hypotheses”, never call them garbage or invalid.
 - The correct selection principle is: choose concise profile-name wording by checking demand and competitor language. You do NOT have search-demand data in this input: never claim a keyword is verified as high-frequency and never invent frequency. Do not send a beginner to external keyword tools as mandatory homework; say the exact wording should be selected on a live diagnostic or by comparing competitor language and demand.
 - Bio priorities are strictly: position/for whom + offer/result + proof (case, numbers, experience, credentials). CTA is optional only if space remains. NEVER lower the profile score or recommend a CTA in bio just because it is absent when those three priorities are already clear.
-2. Publishing frequency — use only supplied Reel dates. Name actual gaps. The reference is 4–7 content units per week. If the data shows no material frequency problem, say so and do not fabricate one.
+2. Publishing frequency — use only supplied Reel dates. Name actual gaps. The reference is 4–7 content units per week. Exclude Reels with isPinned=true from frequency judgement: pinned Reels can be old and do not prove the account stopped publishing. If one old Reel appears among a tight cluster of recent Reels and is marked pinned, explicitly say it was excluded from the frequency calculation. If pinned metadata is absent but one Reel is a strong date outlier while the other supplied Reels form a recent daily/near-daily series, treat the outlier as likely pinned or non-representative and do not penalize frequency from that single gap. Penalize frequency only when non-pinned Reels show real gaps or insufficient recent output. If the data shows no material frequency problem, say so and do not fabricate one.
 3. Scenario and format — analyze only how the six Reels are constructed and delivered, never their topics or target audience.
 - For each Reel, infer its scenario sequence from the complete content block: for example hook → problem/context → idea or demonstration → conclusion → CTA. Use only stages supported by the Reel; do not force a CTA into a scenario where none exists.
 - Find repeating scenario patterns across the six Reels and name the Reel numbers that support each pattern. A scenario is systematic only when a recognisable sequence repeats in at least three Reels. If no such pattern exists, say the creator has not yet selected a repeatable scenario.
