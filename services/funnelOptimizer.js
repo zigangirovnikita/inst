@@ -1,10 +1,13 @@
 const START_VIEWS = 1_000_000;
+const SIMULATION_DAYS = 30;
 const INBOX_RATE = 0.005;
 const CODEWORD_SHARE = 0.7;
-const MANUAL_FIRST_DAY_CAPACITY = 50;
-const MONTHLY_CALL_CAPACITY = 20;
+const DAILY_CHAT_CAPACITY = 40;
+const DAILY_CALL_CAPACITY = 6;
+const MONTHLY_CHAT_CAPACITY = DAILY_CHAT_CAPACITY * SIMULATION_DAYS;
+const MONTHLY_CALL_CAPACITY = DAILY_CALL_CAPACITY * SIMULATION_DAYS;
 const DIRECT_TRIPWIRE_990_RATE = 0.15;
-const VERSION = 12;
+const VERSION = 13;
 const PRICE_POINTS = [4_000, 9_000, 19_000, 29_000, 49_000, 60_000, 100_000, 150_000];
 
 const MATERIALS = {
@@ -70,6 +73,7 @@ function inbox(stages) {
   const total = whole(START_VIEWS * INBOX_RATE);
   const codewords = whole(total * CODEWORD_SHARE);
   add(stages, 'Reels', START_VIEWS, 'Желаемый сценарий за 30 дней');
+  add(stages, 'Средний день', whole(START_VIEWS / SIMULATION_DAYS), 'Модель распределяет просмотры равномерно по 30 дням');
   add(stages, 'Написали в Direct', total, '0,5% от просмотров');
   add(stages, 'Написали кодовое слово', codewords, '70% входящих сообщений');
   add(stages, 'Задали отвлечённый вопрос', total - codewords, '30% входящих сообщений');
@@ -82,11 +86,11 @@ function botPopulation(stages, bot, flow) {
 }
 function closeChat(stages, candidates, price) {
   const requested = whole(candidates);
-  const handled = Math.min(requested, MANUAL_FIRST_DAY_CAPACITY);
+  const handled = Math.min(requested, MONTHLY_CHAT_CAPACITY);
   const lost = requested - handled;
   const sales = whole(handled * chatRate(price));
   add(stages, 'Запросили ручную переписку', requested);
-  add(stages, 'Получили своевременный ответ', handled, 'Лимит: 50 новых диалогов в первые сутки');
+  add(stages, 'Получили своевременный ответ', handled, `Лимит: ${DAILY_CHAT_CAPACITY} переписок в день · ${MONTHLY_CHAT_CAPACITY} за ${SIMULATION_DAYS} дней`);
   if (lost) add(stages, 'Остыли без своевременного ответа', lost);
   add(stages, 'Продали в переписке', sales, `${Math.round(chatRate(price) * 100)}% обработанных переписок`);
   return { ...emptyResult(), chatRequested: requested, chatsHandled: handled, chatSales: sales, lost };
@@ -95,10 +99,10 @@ function closeCalls(stages, candidates, price, applicationsReady = false, manual
   let eligible = whole(candidates);
   let lost = 0;
   if (manualIntake) {
-    const handled = Math.min(eligible, MANUAL_FIRST_DAY_CAPACITY);
+    const handled = Math.min(eligible, MONTHLY_CHAT_CAPACITY);
     lost += eligible - handled;
     eligible = handled;
-    add(stages, 'Получили своевременный первый ответ', handled, 'Лимит: 50 новых диалогов в первые сутки');
+    add(stages, 'Получили своевременный первый ответ', handled, `Лимит: ${DAILY_CHAT_CAPACITY} переписок в день · ${MONTHLY_CHAT_CAPACITY} за ${SIMULATION_DAYS} дней`);
     if (lost) add(stages, 'Остыли без своевременного ответа', lost);
   }
   const rates = callRates(price);
@@ -106,7 +110,7 @@ function closeCalls(stages, candidates, price, applicationsReady = false, manual
   if (!applicationsReady) add(stages, 'Оставили заявку на созвон', applications, `${Math.round(rates.application * 100)}% тёплых лидов`);
   const slots = Math.min(applications, MONTHLY_CALL_CAPACITY);
   lost += applications - slots;
-  add(stages, 'Получили слот на созвон', slots, 'Лимит: 20 созвонов в месяц');
+  add(stages, 'Получили слот на созвон', slots, `Лимит: ${DAILY_CALL_CAPACITY} созвонов в день · ${MONTHLY_CALL_CAPACITY} за ${SIMULATION_DAYS} дней`);
   if (applications > slots) add(stages, 'Не попали на созвон из-за лимита', applications - slots);
   const calls = whole(slots * rates.show);
   const sales = whole(calls * rates.sale);
@@ -115,9 +119,9 @@ function closeCalls(stages, candidates, price, applicationsReady = false, manual
   return { ...emptyResult(), callApplications: applications, calls, callSales: sales, lost };
 }
 function handleSimpleBotOffTopic(stages, flow) {
-  const handled = Math.min(flow.offTopic, MANUAL_FIRST_DAY_CAPACITY);
+  const handled = Math.min(flow.offTopic, MONTHLY_CHAT_CAPACITY);
   const lost = flow.offTopic - handled;
-  add(stages, 'Отвлечённые вопросы получили ручной ответ', handled, 'Лимит: 50 новых диалогов в первые сутки');
+  add(stages, 'Отвлечённые вопросы получили ручной ответ', handled, `Лимит: ${DAILY_CHAT_CAPACITY} переписок в день · ${MONTHLY_CHAT_CAPACITY} за ${SIMULATION_DAYS} дней`);
   if (lost) add(stages, 'Отвлечённые вопросы остыли без ответа', lost);
   return { ...emptyResult(), chatsHandled: handled, lost };
 }
@@ -270,7 +274,7 @@ function optimiseFunnel(answers) {
     || scenarios.slice().sort((a, b) => a.complexity - b.complexity || b.revenue - a.revenue)[0];
   const scoredScenarios = scenarios
     .map(item => {
-      const manualLoadPenalty = Math.max(0, item.flow.chatsRequested - MANUAL_FIRST_DAY_CAPACITY) * productPrice * 0.015;
+      const manualLoadPenalty = Math.max(0, item.flow.chatsRequested - MONTHLY_CHAT_CAPACITY) * productPrice * 0.015;
       const callLoadPenalty = Math.max(0, item.flow.callApplications - MONTHLY_CALL_CAPACITY) * productPrice * 0.03;
       const complexityPenalty = item.complexity * productPrice * 1.7;
       return { item, score: item.revenue - manualLoadPenalty - callLoadPenalty - complexityPenalty };
@@ -291,7 +295,7 @@ function optimiseFunnel(answers) {
     { key: 'recommended', label: 'Оптимальный сейчас', description: 'Баланс выручки, сложности запуска и ручной нагрузки.', scenario: recommended },
     { key: 'maxRevenue', label: 'Лучший по выручке', description: 'Максимальная выручка в модели, даже если запуск сложнее.', scenario: maxRevenue },
   ];
-  return { version: VERSION, startViews: START_VIEWS, inboxRate: INBOX_RATE, codewordShare: CODEWORD_SHARE, manualFirstDayCapacity: MANUAL_FIRST_DAY_CAPACITY, monthlyCallCapacity: MONTHLY_CALL_CAPACITY, productPrice, evaluatedVariants: scenarios.length, scenarios, choices, alternatives: choices.slice(1).map(choice => choice.scenario), selectedChoiceKey: choices.find(choice => choice.scenario.id === recommended.id)?.key || choices[0].key, selectedScenarioId: recommended.id, best: recommended };
+  return { version: VERSION, startViews: START_VIEWS, simulationDays: SIMULATION_DAYS, dailyViews: whole(START_VIEWS / SIMULATION_DAYS), inboxRate: INBOX_RATE, codewordShare: CODEWORD_SHARE, dailyChatCapacity: DAILY_CHAT_CAPACITY, monthlyChatCapacity: MONTHLY_CHAT_CAPACITY, dailyCallCapacity: DAILY_CALL_CAPACITY, monthlyCallCapacity: MONTHLY_CALL_CAPACITY, productPrice, evaluatedVariants: scenarios.length, scenarios, choices, alternatives: choices.slice(1).map(choice => choice.scenario), selectedChoiceKey: choices.find(choice => choice.scenario.id === recommended.id)?.key || choices[0].key, selectedScenarioId: recommended.id, best: recommended };
 }
 
 module.exports = { optimiseFunnel, VERSION };

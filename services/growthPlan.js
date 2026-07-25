@@ -1,6 +1,6 @@
 const POLZA_URL = 'https://api.polza.ai/api/v1/chat/completions';
 const MODEL = 'google/gemini-3.5-flash-lite';
-const VERSION = 13;
+const VERSION = 14;
 
 function parseJson(content) {
   const text = String(content || '').trim().replace(/^\`\`\`json\s*|\s*\`\`\`$/g, '');
@@ -57,7 +57,11 @@ Examples of the required specificity and format (adapt them; do not copy them bl
 
 Do not reveal a full content plan, product ladder, finished offer, funnel copy, or lead magnet. Those are intentionally reserved for a live diagnostic. Do not promise sales or revenue. The tone is direct, useful, and confident, not promotional.
 
-For liveReview, give at least THREE concrete bullets adapted to the selected funnel. One bullet MUST say that the diagnostic prepares a 7-day content plan based on analysed competitor Reels. Another bullet MUST name the funnel stages that need offers or scripts, for example: Reels, code word, AI bot, lesson, tripwire, Direct messages, application, call. A third bullet must name what will be decided about the selected route.
+For liveReview, give exactly FOUR concrete bullets adapted to the selected funnel and the user's business. The four bullets MUST follow these skeletons:
+1) Prepare a 7-day content plan based on successful competitor Reels; name the user's adapted content theme or angle from the supplied niche/product/audience.
+2) Describe the funnel stage sequence and the offers/scripts needed at each stage; name the selected route stages, for example Reels, code word, AI bot, lesson, tripwire, Direct messages, application, call.
+3) Define which target-audience segment will buy, which segment will not buy, and how to attract/qualify the buying segment; adapt this to the user's declared target audience.
+4) Estimate implementation time and required costs/resources so the user does not pay for unnecessary tools or build ineffective steps.
 
 Source data:
 ${JSON.stringify(source)}
@@ -72,7 +76,7 @@ Return ONLY valid JSON with exactly this structure:
   ],
   "liveReview": {
     "intro": "one concise Russian invitation to a 50-minute live review, personalised to this business",
-    "bullets": ["concrete point 1", "concrete point 2", "concrete point 3"]
+    "bullets": ["concrete point 1", "concrete point 2", "concrete point 3", "concrete point 4"]
   }
 }`;
 }
@@ -83,7 +87,7 @@ function validPlan(plan, requiredActions) {
       && Array.isArray(step.actions) && step.actions.length >= 1 && step.actions.length <= 8
       && step.actions.every(action => typeof action?.kind === 'string' && typeof action?.action === 'string' && typeof action?.why === 'string'))
     && requiredActions.every(kind => plan.steps[1].actions.some(action => action.kind === kind))
-    && typeof plan.liveReview?.intro === 'string' && Array.isArray(plan.liveReview?.bullets) && plan.liveReview.bullets.length >= 3;
+    && typeof plan.liveReview?.intro === 'string' && Array.isArray(plan.liveReview?.bullets) && plan.liveReview.bullets.length === 4;
 }
 
 async function generateGrowthPlan(analysis, token, log) {

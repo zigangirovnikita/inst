@@ -176,18 +176,68 @@ function validLeadText(value, limit) {
   return typeof value === 'string' && value.trim().length > 0 && value.trim().length <= limit;
 }
 
+function escapeSvg(value) {
+  return String(value || '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[char]));
+}
+
+function liveAuditFallbackSvg(name) {
+  const labels = {
+    'hero-online-product.png': ['Никита', 'маркетолог и автор разбора'],
+    'case-jobs.png': ['Кейс', 'заявки и автооплаты'],
+    'case-numerology.png': ['Кейс', 'рост подписчиков и оплат'],
+    'case-hypno.png': ['Кейс', 'кодовые слова и оплаты'],
+    'case-china.png': ['Кейс', 'первые продажи из воронки'],
+    'case-funnel.png': ['Кейс', 'конверсии и выручка'],
+    'review-01.png': ['Отзыв', 'разбор ценообразования'],
+    'review-02.png': ['Отзыв', 'воронка и офферы'],
+    'review-03.png': ['Отзыв', 'понимание бизнеса'],
+    'review-04.png': ['Отзыв', 'чёткая информация'],
+    'review-05.png': ['Отзыв', 'экологичный подход'],
+    'review-06.png': ['Отзыв', 'точки роста'],
+  };
+  const [title, subtitle] = labels[name] || ['Материал', 'живой разбор'];
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1000" width="800" height="1000">
+    <defs>
+      <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0" stop-color="#101115"/>
+        <stop offset=".58" stop-color="#24202d"/>
+        <stop offset="1" stop-color="#4d2035"/>
+      </linearGradient>
+      <radialGradient id="glow" cx=".7" cy=".24" r=".7">
+        <stop offset="0" stop-color="#ff6f9f" stop-opacity=".78"/>
+        <stop offset=".42" stop-color="#6d8dff" stop-opacity=".28"/>
+        <stop offset="1" stop-color="#101115" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+    <rect width="800" height="1000" rx="44" fill="url(#bg)"/>
+    <rect width="800" height="1000" rx="44" fill="url(#glow)"/>
+    <rect x="52" y="52" width="696" height="896" rx="34" fill="none" stroke="#ffffff" stroke-opacity=".22" stroke-width="3"/>
+    <circle cx="650" cy="172" r="76" fill="#ff6f9f" fill-opacity=".9"/>
+    <circle cx="588" cy="238" r="30" fill="#ffffff" fill-opacity=".9"/>
+    <text x="90" y="530" fill="#f4f4f7" font-family="Arial, sans-serif" font-size="76" font-weight="800">${escapeSvg(title)}</text>
+    <text x="90" y="610" fill="#c9c7d0" font-family="Arial, sans-serif" font-size="42" font-weight="600">${escapeSvg(subtitle)}</text>
+    <text x="90" y="820" fill="#ff6f9f" font-family="Arial, sans-serif" font-size="32" font-weight="700">insta.marketologii.ru</text>
+  </svg>`;
+}
+
 function isInstagramCdnUrl(value) {
   try { const url = new URL(value); return url.protocol === 'https:' && (url.hostname.endsWith('.cdninstagram.com') || url.hostname.endsWith('.fbcdn.net')); } catch { return false; }
 }
 
-async function sendThumbnail(res, imageUrl) {
-  if (!isInstagramCdnUrl(imageUrl)) { res.writeHead(400); return res.end(); }
-  const upstream = await fetch(imageUrl, { headers: { accept: 'image/avif,image/webp,image/*,*/*;q=0.8', referer: 'https://www.instagram.com/', 'user-agent': 'Mozilla/5.0 AppleWebKit/537.36 Chrome/138 Safari/537.36' }, signal: AbortSignal.timeout(15000) });
-  const contentType = upstream.headers.get('content-type') || '';
-  if (!upstream.ok || !contentType.startsWith('image/')) { res.writeHead(404); return res.end(); }
-  const image = Buffer.from(await upstream.arrayBuffer());
-  res.writeHead(200, { 'content-type': contentType, 'cache-control': 'private, max-age=3600', 'content-length': image.length });
-  res.end(image);
+async function sendThumbnail(res, imageUrls) {
+  const urls = imageUrls.filter(isInstagramCdnUrl);
+  if (!urls.length) { res.writeHead(400); return res.end(); }
+  for (const imageUrl of urls) {
+    try {
+      const upstream = await fetch(imageUrl, { headers: { accept: 'image/avif,image/webp,image/*,*/*;q=0.8', referer: 'https://www.instagram.com/', 'user-agent': 'Mozilla/5.0 AppleWebKit/537.36 Chrome/138 Safari/537.36' }, signal: AbortSignal.timeout(15000) });
+      const contentType = upstream.headers.get('content-type') || '';
+      if (!upstream.ok || !contentType.startsWith('image/')) continue;
+      const image = Buffer.from(await upstream.arrayBuffer());
+      res.writeHead(200, { 'content-type': contentType, 'cache-control': 'private, max-age=3600', 'content-length': image.length });
+      return res.end(image);
+    } catch {}
+  }
+  res.writeHead(404); res.end();
 }
 
 const server = http.createServer(async (req, res) => {
@@ -202,9 +252,9 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && requestUrl.pathname.startsWith('/live-audit-assets/')) {
     const name = requestUrl.pathname.slice('/live-audit-assets/'.length);
     if (!LIVE_AUDIT_ASSETS.has(name)) { res.writeHead(404); return res.end(); }
-    try { const image = fs.readFileSync(path.join(LIVE_AUDIT_ASSETS_DIR, name)); res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'public, max-age=3600' }); return res.end(image); } catch { res.writeHead(404); return res.end(); }
+    try { const image = fs.readFileSync(path.join(LIVE_AUDIT_ASSETS_DIR, name)); res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'public, max-age=3600' }); return res.end(image); } catch { res.writeHead(200, { 'content-type': 'image/svg+xml; charset=utf-8', 'cache-control': 'public, max-age=3600' }); return res.end(liveAuditFallbackSvg(name)); }
   }
-  if (req.method === 'GET' && requestUrl.pathname === '/api/thumbnail') { try { await sendThumbnail(res, requestUrl.searchParams.get('url') || ''); } catch { res.writeHead(404); res.end(); } return; }
+  if (req.method === 'GET' && requestUrl.pathname === '/api/thumbnail') { try { await sendThumbnail(res, requestUrl.searchParams.getAll('url')); } catch { res.writeHead(404); res.end(); } return; }
   if (req.method === 'GET' && requestUrl.pathname.startsWith('/api/analyses/')) {
     const analysis = getAnalysis(requestUrl.pathname.slice('/api/analyses/'.length));
     return analysis ? sendJson(res, 200, analysis) : sendJson(res, 404, { error: 'Анализ не найден.' });
