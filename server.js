@@ -24,6 +24,11 @@ const ADMIN_LOGIN = process.env.ADMIN_LOGIN || '';
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 const LIVE_AUDIT_ASSETS_DIR = path.resolve(process.env.LIVE_AUDIT_ASSETS_DIR || path.join(__dirname, 'public', 'assets', 'live-audit'));
 const LIVE_AUDIT_ASSETS = new Set(['hero-online-product.png', 'case-jobs.png', 'case-numerology.png', 'case-hypno.png', 'case-china.png', 'case-funnel.png', 'review-01.png', 'review-02.png', 'review-03.png', 'review-04.png', 'review-05.png', 'review-06.png']);
+const THUMBNAIL_CACHE_DIR = path.resolve(process.env.THUMBNAIL_CACHE_DIR || path.join(__dirname, 'data', 'thumbnail-cache'));
+const THUMBNAIL_CACHE_TTL_MS = 60 * 60 * 1000;
+const THUMBNAIL_CACHE_MAX_BYTES = 8 * 1024 * 1024;
+const THUMBNAIL_CACHE_TYPES = { '.jpg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.avif': 'image/avif', '.gif': 'image/gif' };
+let lastThumbnailCacheCleanup = 0;
 const analysisAttempts = new Map();
 
 
@@ -257,15 +262,76 @@ function isInstagramCdnUrl(value) {
   try { const url = new URL(value); return url.protocol === 'https:' && (url.hostname.endsWith('.cdninstagram.com') || url.hostname.endsWith('.fbcdn.net')); } catch { return false; }
 }
 
+function thumbnailCacheKey(imageUrl) {
+  return crypto.createHash('sha256').update(imageUrl).digest('hex');
+}
+
+function thumbnailExt(contentType) {
+  const type = String(contentType || '').split(';')[0].trim().toLowerCase();
+  if (type === 'image/jpeg' || type === 'image/jpg') return '.jpg';
+  if (type === 'image/png') return '.png';
+  if (type === 'image/webp') return '.webp';
+  if (type === 'image/avif') return '.avif';
+  if (type === 'image/gif') return '.gif';
+  return '.jpg';
+}
+
+function cleanupThumbnailCache(force = false) {
+  const now = Date.now();
+  if (!force && now - lastThumbnailCacheCleanup < 5 * 60 * 1000) return;
+  lastThumbnailCacheCleanup = now;
+  try {
+    fs.mkdirSync(THUMBNAIL_CACHE_DIR, { recursive: true });
+    for (const name of fs.readdirSync(THUMBNAIL_CACHE_DIR)) {
+      const filePath = path.join(THUMBNAIL_CACHE_DIR, name);
+      const stat = fs.statSync(filePath);
+      if (!stat.isFile() || now - stat.mtimeMs > THUMBNAIL_CACHE_TTL_MS) fs.unlinkSync(filePath);
+    }
+  } catch {}
+}
+
+function cachedThumbnail(imageUrl) {
+  const key = thumbnailCacheKey(imageUrl);
+  const now = Date.now();
+  for (const [ext, contentType] of Object.entries(THUMBNAIL_CACHE_TYPES)) {
+    const filePath = path.join(THUMBNAIL_CACHE_DIR, key + ext);
+    try {
+      const stat = fs.statSync(filePath);
+      if (!stat.isFile()) continue;
+      if (now - stat.mtimeMs > THUMBNAIL_CACHE_TTL_MS) { fs.unlinkSync(filePath); continue; }
+      return { image: fs.readFileSync(filePath), contentType };
+    } catch {}
+  }
+  return null;
+}
+
+function saveThumbnailCache(imageUrl, contentType, image) {
+  if (!Buffer.isBuffer(image) || image.length <= 0 || image.length > THUMBNAIL_CACHE_MAX_BYTES) return;
+  try {
+    fs.mkdirSync(THUMBNAIL_CACHE_DIR, { recursive: true });
+    const filePath = path.join(THUMBNAIL_CACHE_DIR, thumbnailCacheKey(imageUrl) + thumbnailExt(contentType));
+    const tempPath = filePath + '.' + process.pid + '.tmp';
+    fs.writeFileSync(tempPath, image);
+    fs.renameSync(tempPath, filePath);
+  } catch {}
+}
+
 async function sendThumbnail(res, imageUrls) {
+  cleanupThumbnailCache();
   const urls = imageUrls.filter(isInstagramCdnUrl);
   if (!urls.length) { res.writeHead(200, { 'content-type': 'image/svg+xml; charset=utf-8', 'cache-control': 'private, max-age=300' }); return res.end(thumbnailFallbackSvg()); }
   for (const imageUrl of urls) {
+    const cached = cachedThumbnail(imageUrl);
+    if (cached) {
+      res.writeHead(200, { 'content-type': cached.contentType, 'cache-control': 'private, max-age=3600', 'content-length': cached.image.length });
+      return res.end(cached.image);
+    }
     try {
       const upstream = await fetch(imageUrl, { headers: { accept: 'image/avif,image/webp,image/*,*/*;q=0.8', referer: 'https://www.instagram.com/', 'user-agent': 'Mozilla/5.0 AppleWebKit/537.36 Chrome/138 Safari/537.36' }, signal: AbortSignal.timeout(15000) });
       const contentType = upstream.headers.get('content-type') || '';
       if (!upstream.ok || !contentType.startsWith('image/')) continue;
       const image = Buffer.from(await upstream.arrayBuffer());
+      saveThumbnailCache(imageUrl, contentType, image);
       res.writeHead(200, { 'content-type': contentType, 'cache-control': 'private, max-age=3600', 'content-length': image.length });
       return res.end(image);
     } catch {}
