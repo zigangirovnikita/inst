@@ -2,12 +2,12 @@ const START_VIEWS = 1_000_000;
 const SIMULATION_DAYS = 30;
 const INBOX_RATE = 0.005;
 const CODEWORD_SHARE = 0.7;
-const DAILY_CHAT_CAPACITY = 40;
+const DAILY_CHAT_CAPACITY = 30;
 const DAILY_CALL_CAPACITY = 6;
 const MONTHLY_CHAT_CAPACITY = DAILY_CHAT_CAPACITY * SIMULATION_DAYS;
 const MONTHLY_CALL_CAPACITY = DAILY_CALL_CAPACITY * SIMULATION_DAYS;
 const DIRECT_TRIPWIRE_990_RATE = 0.15;
-const VERSION = 14;
+const VERSION = 15;
 const PRICE_POINTS = [4_000, 9_000, 19_000, 29_000, 49_000, 60_000, 100_000, 150_000];
 
 const MATERIALS = {
@@ -132,7 +132,8 @@ function autoSales(stages, people, rate) {
   return { ...emptyResult(), automaticSales: sales };
 }
 function scenarioComplexity(id) {
-  if (id.startsWith('manual_')) return 1;
+  if (id === 'manual_chat') return 1;
+  if (id === 'manual_call') return 2;
   if (id.includes('_direct_')) return 2;
   if (id.includes('checklist') || id.includes('guide')) return 3;
   if (id.includes('article') || id.includes('longread')) return 4;
