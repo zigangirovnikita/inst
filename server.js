@@ -90,12 +90,10 @@ async function collectContent(analysisId, profileUrl, log) {
   try {
     const [details, reels] = await Promise.all([
       runActor({ resultsType: 'details', directUrls: [profileUrl], resultsLimit: 1 }, log, 'apify_profile'),
-      runActor({ resultsType: 'reels', directUrls: [profileUrl], resultsLimit: 12 }, log, 'apify_reels'),
+      runActor({ resultsType: 'reels', directUrls: [profileUrl], resultsLimit: 6 }, log, 'apify_reels'),
     ]);
     const profile = mapProfile(details[0] || {}, profileUrl);
-    const mappedReels = reels.map(mapReel);
-    const latestRegular = mappedReels.filter(reel => !reel.isPinned).sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0)).slice(0, 6);
-    const reelItems = latestRegular.length >= 6 ? latestRegular : mappedReels.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0)).slice(0, 6);
+    const reelItems = reels.map(mapReel).sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0)).slice(0, 6);
     const analysedReels = await analyseReels(reelItems, POLZA_AI_TOKEN, log);
     saveContent(analysisId, profile, analysedReels);
     log('content_collection_completed', { durationMs: Date.now() - startedAt, reelsCount: analysedReels.length });
