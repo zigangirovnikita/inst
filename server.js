@@ -7,8 +7,8 @@ const { analyseErrors } = require('./services/errorAnalysis');
 const { analyseReels } = require('./services/reelAnalysis');
 const { optimiseFunnel, VERSION: FUNNEL_VERSION } = require('./services/funnelOptimizer');
 const { generateGrowthPlan, VERSION: GROWTH_PLAN_VERSION } = require('./services/growthPlan');
-const { deliverLeadToTelegram, isTelegramConfigured } = require('./services/telegramLead');
-const { createAnalysis, findClientAnalysis, saveContent, saveAnswers, claimErrorAnalysis, saveErrorAnalysis, saveFunnelPlan, saveGrowthPlan, saveLeadRequest, updateLeadRequest, failErrorAnalysis, failContent, getAnalysis } = require('./services/database');
+const { deliverLeadToTelegram } = require('./services/telegramLead');
+const { createAnalysis, findClientAnalysis, recordFunnelEvent, saveContent, saveAnswers, claimErrorAnalysis, saveErrorAnalysis, saveFunnelPlan, saveGrowthPlan, saveLeadRequest, updateLeadRequest, failErrorAnalysis, failContent, getAnalysis, getAdminSummary, getAdminLeads } = require('./services/database');
 
 loadEnv(path.join(__dirname, '.env'));
 
@@ -19,6 +19,9 @@ const ACTOR_URL = 'https://api.apify.com/v2/acts/apify~instagram-scraper/run-syn
 const MAX_REQUEST_BYTES = 32 * 1024;
 const ANALYSIS_WINDOW_MS = 60 * 60 * 1000;
 const ANALYSIS_LIMIT_PER_IP = 5;
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';
+const ADMIN_LOGIN = process.env.ADMIN_LOGIN || '';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || '';
 const LIVE_AUDIT_ASSETS_DIR = path.resolve(process.env.LIVE_AUDIT_ASSETS_DIR || path.join(__dirname, 'public', 'assets', 'live-audit'));
 const LIVE_AUDIT_ASSETS = new Set(['hero-online-product.png', 'case-jobs.png', 'case-numerology.png', 'case-hypno.png', 'case-china.png', 'case-funnel.png', 'review-01.png', 'review-02.png', 'review-03.png', 'review-04.png', 'review-05.png', 'review-06.png']);
 const analysisAttempts = new Map();
@@ -141,6 +144,27 @@ function canStartAnalysis(req) {
   analysisAttempts.set(ip, attempts);
   return true;
 }
+
+function hasAdminAccess(req, requestUrl) {
+  if (!ADMIN_TOKEN && (!ADMIN_LOGIN || !ADMIN_PASSWORD)) return true;
+  const auth = req.headers.authorization || '';
+  if (ADMIN_LOGIN && ADMIN_PASSWORD && auth.startsWith('Basic ')) {
+    const decoded = Buffer.from(auth.slice(6), 'base64').toString('utf8');
+    const separator = decoded.indexOf(':');
+    const login = decoded.slice(0, separator);
+    const password = decoded.slice(separator + 1);
+    if (login === ADMIN_LOGIN && password === ADMIN_PASSWORD) return true;
+  }
+  return req.headers['x-admin-token'] === ADMIN_TOKEN || requestUrl.searchParams.get('token') === ADMIN_TOKEN;
+}
+
+function requireAdmin(req, res, requestUrl) {
+  if (hasAdminAccess(req, requestUrl)) return false;
+  res.setHeader('www-authenticate', 'Basic realm="Instagram audit admin", charset="UTF-8"');
+  sendJson(res, 401, { error: 'Нужен доступ администратора.' });
+  return true;
+}
+
 function sendIndex(res) {
   let html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
   for (const file of ['funnel.js', 'growth-plan.js', 'live-audit.js']) {
@@ -247,6 +271,11 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && requestUrl.pathname === '/') return sendIndex(res);
   if (req.method === 'GET' && requestUrl.pathname === '/glass-signal.css') { res.writeHead(200, { 'content-type': 'text/css; charset=utf-8', 'cache-control': 'no-cache' }); return res.end(fs.readFileSync(path.join(__dirname, 'public', 'glass-signal.css'))); }
   if (req.method === 'GET' && requestUrl.pathname === '/design-concepts') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); return res.end(fs.readFileSync(path.join(__dirname, 'public', 'design-concepts.html'))); }
+  if (req.method === 'GET' && requestUrl.pathname === '/admin') {
+    if (requireAdmin(req, res, requestUrl)) return;
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache' });
+    return res.end(fs.readFileSync(path.join(__dirname, 'public', 'admin.html')));
+  }
   if (req.method === 'GET' && requestUrl.pathname === '/funnel.js') { res.writeHead(200, { 'content-type': 'application/javascript; charset=utf-8', 'cache-control': 'no-cache' }); return res.end(fs.readFileSync(path.join(__dirname, 'public', 'funnel.js'))); }
   if (req.method === 'GET' && requestUrl.pathname === '/growth-plan.js') { res.writeHead(200, { 'content-type': 'application/javascript; charset=utf-8', 'cache-control': 'no-cache' }); return res.end(fs.readFileSync(path.join(__dirname, 'public', 'growth-plan.js'))); }
   if (req.method === 'GET' && requestUrl.pathname === '/live-audit.js') { res.writeHead(200, { 'content-type': 'application/javascript; charset=utf-8', 'cache-control': 'no-cache' }); return res.end(fs.readFileSync(path.join(__dirname, 'public', 'live-audit.js'))); }
@@ -256,6 +285,24 @@ const server = http.createServer(async (req, res) => {
     try { const image = fs.readFileSync(path.join(LIVE_AUDIT_ASSETS_DIR, name)); res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'public, max-age=3600' }); return res.end(image); } catch { res.writeHead(200, { 'content-type': 'image/svg+xml; charset=utf-8', 'cache-control': 'public, max-age=3600' }); return res.end(liveAuditFallbackSvg(name)); }
   }
   if (req.method === 'GET' && requestUrl.pathname === '/api/thumbnail') { try { await sendThumbnail(res, requestUrl.searchParams.getAll('url')); } catch { res.writeHead(404); res.end(); } return; }
+  if (req.method === 'GET' && requestUrl.pathname === '/api/admin/summary') {
+    if (requireAdmin(req, res, requestUrl)) return;
+    return sendJson(res, 200, getAdminSummary());
+  }
+  if (req.method === 'GET' && requestUrl.pathname === '/api/admin/leads') {
+    if (requireAdmin(req, res, requestUrl)) return;
+    return sendJson(res, 200, { generatedAt: new Date().toISOString(), leads: getAdminLeads() });
+  }
+  if (req.method === 'POST' && requestUrl.pathname.startsWith('/api/analyses/') && requestUrl.pathname.endsWith('/screen-view')) {
+    try {
+      const analysisId = requestUrl.pathname.split('/')[3] === 'none' ? null : requestUrl.pathname.split('/')[3];
+      const body = await readJson(req);
+      const screen = String(body.screen || '').trim();
+      if (!/^[a-zA-Z][a-zA-Z0-9_-]{0,40}$/.test(screen)) throw new Error('Некорректный экран.');
+      recordFunnelEvent({ analysisId, clientId: String(body.clientId || '').slice(0, 80), screen, details: body.details || {} });
+      return sendJson(res, 200, { ok: true });
+    } catch (error) { return sendJson(res, 400, { error: error.message || 'Не удалось записать событие.' }); }
+  }
   if (req.method === 'GET' && requestUrl.pathname.startsWith('/api/analyses/')) {
     const analysis = getAnalysis(requestUrl.pathname.slice('/api/analyses/'.length));
     return analysis ? sendJson(res, 200, analysis) : sendJson(res, 404, { error: 'Анализ не найден.' });
@@ -313,17 +360,19 @@ const server = http.createServer(async (req, res) => {
       const body = await readJson(req);
       if (!validLeadText(body.name, 120) || !validLeadText(body.contact, 180)) throw new Error('Укажи имя и Telegram или номер телефона.');
       if (String(body.website || '').trim()) throw new Error('Не удалось отправить заявку.');
-      if (!isTelegramConfigured()) throw new Error('Telegram-бот для заявок пока не настроен.');
       const lead = {
         id: crypto.randomUUID(), analysisId, name: body.name.trim(), contact: body.contact.trim(),
         product: String(body.product || analysis.answers?.product || '').trim().slice(0, 240),
         productPrice: Number(String(body.productPrice || analysis.answers?.price || '').replace(/[^\d]/g, '')) || 0,
         socialLink: String(body.socialLink || analysis.profile?.username || '').trim().slice(0, 240),
         comment: String(body.comment || '').trim().slice(0, 1000), funnelRevenue: analysis.funnelPlan?.best?.revenue || 0,
+        clientId: String(body.clientId || '').slice(0, 80),
       };
       saveLeadRequest(lead.id, analysisId, lead, 'pending');
-      try { await deliverLeadToTelegram(lead); updateLeadRequest(lead.id, 'delivered'); } catch (error) { updateLeadRequest(lead.id, 'failed', error.message || 'telegram_failed'); throw new Error('Не удалось отправить заявку. Попробуй ещё раз позже.'); }
-      const { log } = createAnalysisLogger(analysis.profileUrl, analysisId); log('live_audit_lead_delivered', { leadId: lead.id });
+      recordFunnelEvent({ analysisId, clientId: lead.clientId, screen: 'leadSubmitted', details: { leadId: lead.id } });
+      let deliveryStatus = 'delivered';
+      try { await deliverLeadToTelegram(lead); updateLeadRequest(lead.id, deliveryStatus); } catch (error) { deliveryStatus = 'failed'; updateLeadRequest(lead.id, deliveryStatus, error.message || 'telegram_failed'); }
+      const { log } = createAnalysisLogger(analysis.profileUrl, analysisId); log('live_audit_lead_saved', { leadId: lead.id, deliveryStatus });
       return sendJson(res, 200, { ok: true });
     } catch (error) { return sendJson(res, 400, { error: error.message || 'Не удалось отправить заявку.' }); }
   }

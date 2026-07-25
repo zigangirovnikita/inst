@@ -34,6 +34,14 @@ database.exec(`
     id TEXT PRIMARY KEY, analysis_id TEXT NOT NULL, payload_json TEXT NOT NULL,
     status TEXT NOT NULL, error_message TEXT, created_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS funnel_events (
+    id INTEGER PRIMARY KEY,
+    analysis_id TEXT,
+    client_id TEXT,
+    screen TEXT NOT NULL,
+    details_json TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
 `);
 
 function addColumn(name, definition) {
@@ -64,6 +72,11 @@ function findClientAnalysis(clientId, profileUrl) {
 function recordEvent(analysisId, event, details) {
   database.prepare('INSERT INTO analysis_events (analysis_id, created_at, event, details_json) VALUES (?, ?, ?, ?)')
     .run(analysisId, new Date().toISOString(), event, JSON.stringify(details));
+}
+
+function recordFunnelEvent({ analysisId = null, clientId = null, screen, details = {} }) {
+  database.prepare('INSERT INTO funnel_events (analysis_id, client_id, screen, details_json, created_at) VALUES (?, ?, ?, ?, ?)')
+    .run(analysisId, clientId, screen, JSON.stringify(details), new Date().toISOString());
 }
 
 function saveContent(analysisId, profile, reels) {
@@ -128,4 +141,77 @@ function getAnalysis(analysisId) {
   };
 }
 
-module.exports = { createAnalysis, findClientAnalysis, recordEvent, saveContent, saveAnswers, claimErrorAnalysis, saveErrorAnalysis, saveFunnelPlan, saveGrowthPlan, saveLeadRequest, updateLeadRequest, failErrorAnalysis, failContent, getAnalysis };
+function getAdminSummary() {
+  const stages = [
+    ['start', 'Вход'],
+    ['questions', 'Вопросы'],
+    ['profile', 'Профиль / Reels'],
+    ['errors', 'Анализ ошибок'],
+    ['funnelResult', 'Расчет воронки'],
+    ['growthPlan', 'План на 30 дней'],
+    ['liveAudit', 'Живой разбор'],
+    ['leadForm', 'Форма заявки'],
+    ['leadSuccess', 'Спасибо после заявки'],
+  ];
+  const screenRows = database.prepare(`
+    SELECT screen, COUNT(DISTINCT COALESCE(NULLIF(client_id, ''), analysis_id)) AS people
+    FROM funnel_events
+    GROUP BY screen
+  `).all();
+  const byScreen = new Map(screenRows.map(row => [row.screen, row.people]));
+  const leadPeople = database.prepare(`
+    SELECT COUNT(DISTINCT COALESCE(NULLIF(a.client_id, ''), l.analysis_id)) AS people
+    FROM lead_requests l
+    LEFT JOIN analyses a ON a.id = l.analysis_id
+  `).get().people || 0;
+  const totalLeads = database.prepare('SELECT COUNT(*) AS total FROM lead_requests').get().total || 0;
+  const rows = stages.map(([screen, label], index) => {
+    const people = screen === 'leadSuccess' ? Math.max(byScreen.get(screen) || 0, leadPeople) : byScreen.get(screen) || 0;
+    const previousPeople = index ? null : people;
+    return { screen, label, people, previousPeople };
+  });
+  for (let index = 1; index < rows.length; index += 1) rows[index].previousPeople = rows[index - 1].people;
+  const entrances = rows[0]?.people || 0;
+  return {
+    generatedAt: new Date().toISOString(),
+    entrances,
+    leadPeople,
+    totalLeads,
+    overallConversion: entrances ? leadPeople / entrances : 0,
+    stages: rows.map(row => ({
+      ...row,
+      stepConversion: row.previousPeople ? row.people / row.previousPeople : 0,
+      entranceConversion: entrances ? row.people / entrances : 0,
+      lostFromPrevious: Math.max(0, (row.previousPeople || 0) - row.people),
+    })),
+  };
+}
+
+function getAdminLeads() {
+  const rows = database.prepare(`
+    SELECT l.*, a.profile_url, a.profile_json, a.answers_json, a.error_analysis_json, a.funnel_plan_json,
+      a.growth_plan_json, a.created_at AS analysis_created_at
+    FROM lead_requests l
+    LEFT JOIN analyses a ON a.id = l.analysis_id
+    ORDER BY l.created_at DESC
+  `).all();
+  return rows.map(row => ({
+    id: row.id,
+    analysisId: row.analysis_id,
+    status: row.status,
+    errorMessage: row.error_message,
+    createdAt: row.created_at,
+    payload: JSON.parse(row.payload_json),
+    analysis: {
+      profileUrl: row.profile_url,
+      profile: row.profile_json ? JSON.parse(row.profile_json) : null,
+      answers: row.answers_json ? JSON.parse(row.answers_json) : null,
+      errorAnalysis: row.error_analysis_json ? JSON.parse(row.error_analysis_json) : null,
+      funnelPlan: row.funnel_plan_json ? JSON.parse(row.funnel_plan_json) : null,
+      growthPlan: row.growth_plan_json ? JSON.parse(row.growth_plan_json) : null,
+      createdAt: row.analysis_created_at,
+    },
+  }));
+}
+
+module.exports = { createAnalysis, findClientAnalysis, recordEvent, recordFunnelEvent, saveContent, saveAnswers, claimErrorAnalysis, saveErrorAnalysis, saveFunnelPlan, saveGrowthPlan, saveLeadRequest, updateLeadRequest, failErrorAnalysis, failContent, getAnalysis, getAdminSummary, getAdminLeads };

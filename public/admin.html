@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Админка Instagram-аудита</title>
+<style>
+:root{font-family:Inter,ui-sans-serif,system-ui,sans-serif;color:#f4f4f7;background:#101115}
+*{box-sizing:border-box}body{margin:0;background:#101115}button,input{font:inherit}
+.admin{width:min(1180px,calc(100% - 28px));margin:auto;padding:28px 0 60px}
+.top{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:22px}
+h1{font-size:clamp(28px,4vw,44px);line-height:1.05;margin:0;letter-spacing:-.04em}h2{margin:0 0 14px;font-size:22px}
+.muted{color:#a8adba}.tabs{display:flex;gap:8px;flex-wrap:wrap}
+.tab{border:1px solid #31343e;background:#171922;color:#f4f4f7;border-radius:10px;padding:10px 13px;cursor:pointer}
+.tab.active{background:#f0b54d;color:#191305;border-color:#f0b54d}
+.panel{display:none}.panel.active{display:block}
+.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:18px 0}
+.metric,.card{border:1px solid #30333d;background:#171922;border-radius:8px;padding:16px}
+.metric span{display:block;color:#a8adba;font-size:13px}.metric b{display:block;margin-top:6px;font-size:28px}
+.chart{height:330px;display:flex;align-items:end;gap:16px;overflow-x:auto;padding:20px 6px 8px;border:1px solid #30333d;border-radius:8px;background:#151720}
+.bar{flex:0 0 88px;height:100%;display:grid;align-items:end;grid-template-rows:1fr auto;gap:10px}
+.line-wrap{height:240px;display:flex;align-items:end;justify-content:center;border-bottom:1px solid #343744}
+.line{width:18px;min-height:2px;border-radius:999px 999px 0 0;background:linear-gradient(180deg,#ff719f,#f0b54d)}
+.bar b,.bar span{display:block;text-align:center}.bar b{font-size:14px}.bar span{font-size:12px;color:#a8adba}
+.stage-table{width:100%;border-collapse:collapse;margin-top:16px;overflow:hidden;border-radius:8px}
+th,td{text-align:left;padding:12px;border-bottom:1px solid #2d303a;vertical-align:top}th{color:#a8adba;font-size:13px;font-weight:700}
+.lead{display:grid;grid-template-columns:1.1fr .9fr auto;gap:12px;align-items:start;margin:10px 0}
+.lead h3{margin:0 0 5px;font-size:18px}.lead p{margin:4px 0;color:#c8ccd6}
+.badge{display:inline-flex;border-radius:999px;padding:5px 9px;background:#26303f;color:#dce6ff;font-size:12px}
+details{margin-top:10px}summary{cursor:pointer;color:#f0b54d;font-weight:800}
+pre{max-height:420px;overflow:auto;white-space:pre-wrap;background:#0c0d12;border:1px solid #2c2f38;border-radius:8px;padding:12px;color:#d9dce5;font-size:12px}
+.empty{padding:36px;text-align:center;border:1px dashed #343844;border-radius:8px;color:#a8adba}
+@media(max-width:760px){.top{display:block}.tabs{margin-top:14px}.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.lead{grid-template-columns:1fr}.metric b{font-size:23px}}
+</style>
+</head>
+<body>
+<main class="admin">
+  <div class="top">
+    <div><h1>Админка</h1><div class="muted" id="updated">Загружаю данные…</div></div>
+    <nav class="tabs" aria-label="Разделы админки">
+      <button class="tab active" data-tab="conversions">Конверсии</button>
+      <button class="tab" data-tab="leads">Заявки</button>
+    </nav>
+  </div>
+  <section class="panel active" id="conversions"></section>
+  <section class="panel" id="leads"></section>
+</main>
+<script>
+const token=new URLSearchParams(location.search).get('token')||'';
+const fmt=new Intl.NumberFormat('ru-RU');
+const pct=value=>new Intl.NumberFormat('ru-RU',{maximumFractionDigits:1}).format((value||0)*100)+'%';
+const date=value=>value?new Intl.DateTimeFormat('ru-RU',{dateStyle:'short',timeStyle:'short'}).format(new Date(value)):'';
+const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[char]));
+async function api(path){const response=await fetch(path+(token?(path.includes('?')?'&':'?')+'token='+encodeURIComponent(token):''));const data=await response.json();if(!response.ok)throw new Error(data.error||'Ошибка загрузки');return data}
+function renderConversions(data){
+  const max=Math.max(1,...data.stages.map(stage=>stage.people));
+  const bars=data.stages.map(stage=>`<div class="bar"><div class="line-wrap"><i class="line" style="height:${Math.max(2,stage.people/max*100)}%"></i></div><div><b>${fmt.format(stage.people)}</b><span>${esc(stage.label)}</span></div></div>`).join('');
+  const rows=data.stages.map(stage=>`<tr><td>${esc(stage.label)}</td><td>${fmt.format(stage.people)}</td><td>${pct(stage.stepConversion)}</td><td>${pct(stage.entranceConversion)}</td><td>${fmt.format(stage.lostFromPrevious)}</td></tr>`).join('');
+  document.querySelector('#conversions').innerHTML=`<div class="metrics"><article class="metric"><span>Входов</span><b>${fmt.format(data.entrances)}</b></article><article class="metric"><span>Людей с заявкой</span><b>${fmt.format(data.leadPeople)}</b></article><article class="metric"><span>Всего заявок</span><b>${fmt.format(data.totalLeads)}</b></article><article class="metric"><span>Вход → заявка</span><b>${pct(data.overallConversion)}</b></article></div><section class="card"><h2>Люди на каждом экране</h2><div class="chart">${bars}</div></section><table class="stage-table"><thead><tr><th>Экран</th><th>Людей</th><th>Конверсия с прошлого</th><th>От входа</th><th>Потеряно</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+function leadJson(lead){return JSON.stringify({payload:lead.payload,analysis:lead.analysis},null,2)}
+function renderLeads(data){
+  const leads=data.leads.map(lead=>{
+    const payload=lead.payload||{}, answers=lead.analysis?.answers||{}, profile=lead.analysis?.profile||{};
+    return `<article class="lead card"><div><h3>${esc(payload.name||answers.name||'Без имени')}</h3><p>${esc(payload.contact||'Контакт не указан')}</p><p>${esc(payload.comment||'Комментария нет')}</p></div><div><p><b>Instagram:</b> ${esc(payload.socialLink||profile.username||lead.analysis?.profileUrl||'')}</p><p><b>Продукт:</b> ${esc(payload.product||answers.product||'')}</p><p><b>Чек:</b> ${esc(payload.productPrice||answers.price||'')}</p></div><div><span class="badge">${esc(lead.status)}</span><p class="muted">${date(lead.createdAt)}</p></div><details><summary>Ответы пользователя и ответы нейросетей</summary><pre>${esc(leadJson(lead))}</pre></details></article>`;
+  }).join('');
+  document.querySelector('#leads').innerHTML=leads||'<div class="empty">Заявок пока нет.</div>';
+}
+async function load(){
+  try{const [summary,leads]=await Promise.all([api('/api/admin/summary'),api('/api/admin/leads')]);renderConversions(summary);renderLeads(leads);document.querySelector('#updated').textContent='Обновлено: '+date(summary.generatedAt)}
+  catch(error){document.querySelector('#updated').textContent=error.message}
+}
+document.querySelectorAll('[data-tab]').forEach(button=>button.onclick=()=>{document.querySelectorAll('[data-tab]').forEach(item=>item.classList.toggle('active',item===button));document.querySelectorAll('.panel').forEach(panel=>panel.classList.toggle('active',panel.id===button.dataset.tab))});
+load();
+</script>
+</body>
+</html>
