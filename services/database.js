@@ -214,4 +214,48 @@ function getAdminLeads() {
   }));
 }
 
-module.exports = { createAnalysis, findClientAnalysis, recordEvent, recordFunnelEvent, saveContent, saveAnswers, claimErrorAnalysis, saveErrorAnalysis, saveFunnelPlan, saveGrowthPlan, saveLeadRequest, updateLeadRequest, failErrorAnalysis, failContent, getAnalysis, getAdminSummary, getAdminLeads };
+function getAdminAnalyses() {
+  const rows = database.prepare(`
+    SELECT a.*,
+      COUNT(DISTINCT l.id) AS lead_count,
+      MAX(l.created_at) AS last_lead_at,
+      GROUP_CONCAT(DISTINCT fe.screen) AS visited_screens
+    FROM analyses a
+    LEFT JOIN lead_requests l ON l.analysis_id = a.id
+    LEFT JOIN funnel_events fe ON fe.analysis_id = a.id
+    GROUP BY a.id
+    ORDER BY a.created_at DESC
+  `).all();
+  return rows.map(row => {
+    const profile = row.profile_json ? JSON.parse(row.profile_json) : null;
+    const answers = row.answers_json ? JSON.parse(row.answers_json) : null;
+    const funnelPlan = row.funnel_plan_json ? JSON.parse(row.funnel_plan_json) : null;
+    const growthPlan = row.growth_plan_json ? JSON.parse(row.growth_plan_json) : null;
+    const errorAnalysis = row.error_analysis_json ? JSON.parse(row.error_analysis_json) : null;
+    return {
+      analysisId: row.id,
+      clientId: row.client_id,
+      profileUrl: row.profile_url,
+      instagram: profile?.username ? '@' + profile.username : row.profile_url,
+      status: row.status,
+      contentStatus: row.content_status,
+      errorStatus: row.error_status,
+      createdAt: row.created_at,
+      completedAt: row.completed_at,
+      error: row.error_message,
+      leadCount: row.lead_count || 0,
+      lastLeadAt: row.last_lead_at,
+      visitedScreens: row.visited_screens ? row.visited_screens.split(',') : [],
+      answers,
+      selectedFunnel: funnelPlan ? {
+        choiceKey: funnelPlan.selectedChoiceKey || '',
+        scenarioId: funnelPlan.selectedScenarioId || funnelPlan.best?.id || '',
+        title: funnelPlan.best?.title || funnelPlan.best?.name || '',
+        revenue: funnelPlan.best?.revenue || 0,
+      } : null,
+      ai: { profile, errorAnalysis, funnelPlan, growthPlan },
+    };
+  });
+}
+
+module.exports = { createAnalysis, findClientAnalysis, recordEvent, recordFunnelEvent, saveContent, saveAnswers, claimErrorAnalysis, saveErrorAnalysis, saveFunnelPlan, saveGrowthPlan, saveLeadRequest, updateLeadRequest, failErrorAnalysis, failContent, getAnalysis, getAdminSummary, getAdminLeads, getAdminAnalyses };

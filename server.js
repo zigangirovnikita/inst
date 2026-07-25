@@ -8,7 +8,7 @@ const { analyseReels } = require('./services/reelAnalysis');
 const { optimiseFunnel, VERSION: FUNNEL_VERSION } = require('./services/funnelOptimizer');
 const { generateGrowthPlan, VERSION: GROWTH_PLAN_VERSION } = require('./services/growthPlan');
 const { deliverLeadToTelegram } = require('./services/telegramLead');
-const { createAnalysis, findClientAnalysis, recordFunnelEvent, saveContent, saveAnswers, claimErrorAnalysis, saveErrorAnalysis, saveFunnelPlan, saveGrowthPlan, saveLeadRequest, updateLeadRequest, failErrorAnalysis, failContent, getAnalysis, getAdminSummary, getAdminLeads } = require('./services/database');
+const { createAnalysis, findClientAnalysis, recordFunnelEvent, saveContent, saveAnswers, claimErrorAnalysis, saveErrorAnalysis, saveFunnelPlan, saveGrowthPlan, saveLeadRequest, updateLeadRequest, failErrorAnalysis, failContent, getAnalysis, getAdminSummary, getAdminLeads, getAdminAnalyses } = require('./services/database');
 
 loadEnv(path.join(__dirname, '.env'));
 
@@ -292,6 +292,10 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && requestUrl.pathname === '/api/admin/leads') {
     if (requireAdmin(req, res, requestUrl)) return;
     return sendJson(res, 200, { generatedAt: new Date().toISOString(), leads: getAdminLeads() });
+  }
+  if (req.method === 'GET' && requestUrl.pathname === '/api/admin/analyses') {
+    if (requireAdmin(req, res, requestUrl)) return;
+    return sendJson(res, 200, { generatedAt: new Date().toISOString(), analyses: getAdminAnalyses() });
   }
   if (req.method === 'POST' && requestUrl.pathname.startsWith('/api/analyses/') && requestUrl.pathname.endsWith('/screen-view')) {
     try {

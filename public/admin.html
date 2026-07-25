@@ -24,6 +24,8 @@ h1{font-size:clamp(28px,4vw,44px);line-height:1.05;margin:0;letter-spacing:-.04e
 .bar b,.bar span{display:block;text-align:center}.bar b{font-size:14px}.bar span{font-size:12px;color:#a8adba}
 .stage-table{width:100%;border-collapse:collapse;margin-top:16px;overflow:hidden;border-radius:8px}
 th,td{text-align:left;padding:12px;border-bottom:1px solid #2d303a;vertical-align:top}th{color:#a8adba;font-size:13px;font-weight:700}
+.table-wrap{overflow-x:auto;border:1px solid #30333d;border-radius:8px;background:#171922}.table-wrap table{min-width:1120px;margin:0}
+.toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 12px}.download{border:0;background:#f0b54d;color:#191305;border-radius:10px;padding:10px 13px;font-weight:800;cursor:pointer}
 .lead{display:grid;grid-template-columns:1.1fr .9fr auto;gap:12px;align-items:start;margin:10px 0}
 .lead h3{margin:0 0 5px;font-size:18px}.lead p{margin:4px 0;color:#c8ccd6}
 .badge{display:inline-flex;border-radius:999px;padding:5px 9px;background:#26303f;color:#dce6ff;font-size:12px}
@@ -39,10 +41,12 @@ pre{max-height:420px;overflow:auto;white-space:pre-wrap;background:#0c0d12;borde
     <div><h1>Админка</h1><div class="muted" id="updated">Загружаю данные…</div></div>
     <nav class="tabs" aria-label="Разделы админки">
       <button class="tab active" data-tab="conversions">Конверсии</button>
+      <button class="tab" data-tab="users">Все пользователи</button>
       <button class="tab" data-tab="leads">Заявки</button>
     </nav>
   </div>
   <section class="panel active" id="conversions"></section>
+  <section class="panel" id="users"></section>
   <section class="panel" id="leads"></section>
 </main>
 <script>
@@ -51,6 +55,7 @@ const fmt=new Intl.NumberFormat('ru-RU');
 const pct=value=>new Intl.NumberFormat('ru-RU',{maximumFractionDigits:1}).format((value||0)*100)+'%';
 const date=value=>value?new Intl.DateTimeFormat('ru-RU',{dateStyle:'short',timeStyle:'short'}).format(new Date(value)):'';
 const esc=value=>String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[char]));
+let allAnalyses=[];
 async function api(path){const response=await fetch(path+(token?(path.includes('?')?'&':'?')+'token='+encodeURIComponent(token):''));const data=await response.json();if(!response.ok)throw new Error(data.error||'Ошибка загрузки');return data}
 function renderConversions(data){
   const max=Math.max(1,...data.stages.map(stage=>stage.people));
@@ -59,6 +64,20 @@ function renderConversions(data){
   document.querySelector('#conversions').innerHTML=`<div class="metrics"><article class="metric"><span>Входов</span><b>${fmt.format(data.entrances)}</b></article><article class="metric"><span>Людей с заявкой</span><b>${fmt.format(data.leadPeople)}</b></article><article class="metric"><span>Всего заявок</span><b>${fmt.format(data.totalLeads)}</b></article><article class="metric"><span>Вход → заявка</span><b>${pct(data.overallConversion)}</b></article></div><section class="card"><h2>Люди на каждом экране</h2><div class="chart">${bars}</div></section><table class="stage-table"><thead><tr><th>Экран</th><th>Людей</th><th>Конверсия с прошлого</th><th>От входа</th><th>Потеряно</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 function leadJson(lead){return JSON.stringify({payload:lead.payload,analysis:lead.analysis},null,2)}
+function valueText(value){return value===null||value===undefined?'':typeof value==='object'?JSON.stringify(value):String(value)}
+function csvCell(value){const text=valueText(value).replace(/\r?\n/g,' ').trim();const safe=/^[=+\-@]/.test(text)?"'"+text:text;return '"'+safe.replace(/"/g,'""')+'"'}
+function downloadCsv(){
+  const header=['createdAt','analysisId','clientId','instagram','profileUrl','status','contentStatus','errorStatus','visitedScreens','leadCount','name','niche','product','price','audience','selectedFunnel','selectedRevenue','errorAnalysis','funnelPlan','growthPlan'];
+  const rows=allAnalyses.map(item=>{const answers=item.answers||{}, selected=item.selectedFunnel||{};return [item.createdAt,item.analysisId,item.clientId,item.instagram,item.profileUrl,item.status,item.contentStatus,item.errorStatus,(item.visitedScreens||[]).join(' > '),item.leadCount,answers.name,answers.niche,answers.product,answers.price,answers.audience,selected.title,selected.revenue,item.ai?.errorAnalysis,item.ai?.funnelPlan,item.ai?.growthPlan].map(csvCell).join(',')});
+  const blob=new Blob(['\ufeff'+[header.map(csvCell).join(','),...rows].join('\n')],{type:'text/csv;charset=utf-8'});
+  const link=document.createElement('a');link.href=URL.createObjectURL(blob);link.download='instagram-audit-users.csv';link.click();URL.revokeObjectURL(link.href);
+}
+function renderUsers(data){
+  allAnalyses=data.analyses||[];
+  const rows=allAnalyses.map(item=>{const answers=item.answers||{}, selected=item.selectedFunnel||{};return `<tr><td>${date(item.createdAt)}</td><td>${esc(item.instagram||'')}</td><td>${esc(answers.name||'')}</td><td>${esc(answers.niche||'')}</td><td>${esc(answers.product||'')}</td><td>${esc(answers.price||'')}</td><td>${esc(answers.audience||'')}</td><td>${esc(selected.title||'')}</td><td>${fmt.format(selected.revenue||0)}</td><td>${esc((item.visitedScreens||[]).join(' → '))}</td><td>${fmt.format(item.leadCount||0)}</td><td><span class="badge">${esc(item.errorStatus)}</span></td><td><details><summary>JSON</summary><pre>${esc(JSON.stringify(item,null,2))}</pre></details></td></tr>`}).join('');
+  document.querySelector('#users').innerHTML=`<div class="toolbar"><h2>Все пользователи и ответы</h2><button class="download" id="download-users">Выгрузить CSV</button></div><div class="table-wrap"><table class="stage-table"><thead><tr><th>Дата</th><th>Instagram</th><th>Имя</th><th>Ниша</th><th>Продукт</th><th>Чек</th><th>Аудитория</th><th>Выбор воронки</th><th>Выручка</th><th>Экраны</th><th>Заявки</th><th>AI статус</th><th>Полные данные</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  document.querySelector('#download-users').onclick=downloadCsv;
+}
 function renderLeads(data){
   const leads=data.leads.map(lead=>{
     const payload=lead.payload||{}, answers=lead.analysis?.answers||{}, profile=lead.analysis?.profile||{};
@@ -67,7 +86,7 @@ function renderLeads(data){
   document.querySelector('#leads').innerHTML=leads||'<div class="empty">Заявок пока нет.</div>';
 }
 async function load(){
-  try{const [summary,leads]=await Promise.all([api('/api/admin/summary'),api('/api/admin/leads')]);renderConversions(summary);renderLeads(leads);document.querySelector('#updated').textContent='Обновлено: '+date(summary.generatedAt)}
+  try{const [summary,analyses,leads]=await Promise.all([api('/api/admin/summary'),api('/api/admin/analyses'),api('/api/admin/leads')]);renderConversions(summary);renderUsers(analyses);renderLeads(leads);document.querySelector('#updated').textContent='Обновлено: '+date(summary.generatedAt)}
   catch(error){document.querySelector('#updated').textContent=error.message}
 }
 document.querySelectorAll('[data-tab]').forEach(button=>button.onclick=()=>{document.querySelectorAll('[data-tab]').forEach(item=>item.classList.toggle('active',item===button));document.querySelectorAll('.panel').forEach(panel=>panel.classList.toggle('active',panel.id===button.dataset.tab))});
