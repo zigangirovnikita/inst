@@ -8,7 +8,7 @@ const MANUAL_CHAT_CAPACITY = DAILY_CHAT_CAPACITY * SIMULATION_DAYS;
 const MANUAL_CALL_CAPACITY = DAILY_CALL_CAPACITY * SIMULATION_DAYS;
 const DIRECT_TRIPWIRE_990_RATE = 0.15;
 const WEBINAR_AUTO_PURCHASE_RATE = 0.08;
-const VERSION = 18;
+const VERSION = 19;
 const PRICE_POINTS = [4_000, 9_000, 19_000, 29_000, 49_000, 60_000, 100_000, 150_000];
 
 const MATERIALS = {
@@ -171,6 +171,42 @@ function finish({ id, title, stages, productPrice, result, tripwireRevenue = 0, 
     flow: { chatsRequested: result.chatRequested, chatsHandled: result.chatsHandled, callApplications: result.callApplications, callsHeld: result.calls, lost: result.lost }, note,
   };
 }
+function burnout(flow, id) {
+  const chatLoad = flow.chatsHandled / MANUAL_CHAT_CAPACITY;
+  const callLoad = flow.callsHeld / MANUAL_CALL_CAPACITY;
+  const score = Math.round((chatLoad * 70) + (callLoad * 80) + (id.startsWith('manual_') ? 15 : 0));
+  if (chatLoad >= 0.95 || callLoad >= 0.9 || score >= 80) return { level: 'критический', score };
+  if (score >= 55) return { level: 'высокий', score };
+  if (score >= 25) return { level: 'средний', score };
+  return { level: 'низкий', score };
+}
+function loadText(flow, id) {
+  const parts = [];
+  const chatKind = id === 'manual_chat' ? 'продающих' : 'ручных';
+  if (flow.chatsHandled >= MANUAL_CHAT_CAPACITY * 0.95) parts.push(`${DAILY_CHAT_CAPACITY} ${chatKind} переписок каждый день ${SIMULATION_DAYS} дней подряд`);
+  else if (flow.chatsHandled) parts.push(`в среднем ${number(Math.ceil(flow.chatsHandled / SIMULATION_DAYS))} ручн. переписок в день`);
+  if (flow.callsHeld >= MANUAL_CALL_CAPACITY * 0.95) parts.push(`${DAILY_CALL_CAPACITY} созвонов каждый день ${SIMULATION_DAYS} дней подряд`);
+  else if (flow.callsHeld) parts.push(`в среднем ${number(Math.ceil(flow.callsHeld / SIMULATION_DAYS))} созв. в день`);
+  return parts.join(' + ') || 'ручная нагрузка почти не требуется';
+}
+function addBusinessSummary(scenarios, maxRevenue) {
+  return scenarios.map(item => {
+    const totalInquiries = whole(START_VIEWS * INBOX_RATE);
+    const processedInquiries = Math.max(0, totalInquiries - item.flow.lost);
+    return {
+      ...item,
+      businessSummary: {
+        revenue: item.revenue,
+        processedInquiries,
+        totalInquiries,
+        lostInquiries: item.flow.lost,
+        missedRevenue: Math.max(0, maxRevenue.revenue - item.revenue),
+        load: loadText(item.flow, item.id),
+        burnout: burnout(item.flow, item.id),
+      },
+    };
+  });
+}
 function manualRoute(productPrice, method) {
   const stages = [];
   const flow = inbox(stages);
@@ -298,13 +334,14 @@ function optimiseFunnel(answers) {
     scenarios.push(...tripwireRoutes(bot, answers, productPrice));
   }
   scenarios.sort((a, b) => b.revenue - a.revenue || a.lostLeads - b.lostLeads || a.calls - b.calls);
-  const maxRevenue = scenarios[0];
+  const summarizedScenarios = addBusinessSummary(scenarios, scenarios[0]);
+  const maxRevenue = summarizedScenarios[0];
   const revenueTarget = maxRevenue.revenue * 0.55;
-  const simple = scenarios
+  const simple = summarizedScenarios
     .filter(item => item.revenue >= revenueTarget && item.complexity <= 3)
     .sort((a, b) => a.complexity - b.complexity || b.revenue - a.revenue || a.lostLeads - b.lostLeads)[0]
-    || scenarios.slice().sort((a, b) => a.complexity - b.complexity || b.revenue - a.revenue)[0];
-  const scoredScenarios = scenarios
+    || summarizedScenarios.slice().sort((a, b) => a.complexity - b.complexity || b.revenue - a.revenue)[0];
+  const scoredScenarios = summarizedScenarios
     .map(item => {
       const manualLoadPenalty = Math.max(0, item.flow.chatsRequested - MANUAL_CHAT_CAPACITY) * productPrice * 0.015;
       const callLoadPenalty = Math.max(0, item.flow.callApplications - MANUAL_CALL_CAPACITY) * productPrice * 0.03;
@@ -314,7 +351,7 @@ function optimiseFunnel(answers) {
     .sort((a, b) => b.score - a.score || b.item.revenue - a.item.revenue);
   let recommended = scoredScenarios[0].item;
   if (productPrice <= 5_000 && !training(answers)) {
-    recommended = scenarios.find(item => item.id === 'simple_direct_chat') || simple;
+    recommended = summarizedScenarios.find(item => item.id === 'simple_direct_chat') || simple;
   }
   if (recommended.id === maxRevenue.id) {
     recommended = scoredScenarios.find(({ item }) => item.id !== maxRevenue.id && item.id !== simple.id)?.item || recommended;
@@ -327,7 +364,7 @@ function optimiseFunnel(answers) {
     { key: 'recommended', label: 'Оптимальный сейчас', description: 'Баланс выручки, сложности запуска и ручной нагрузки.', scenario: recommended },
     { key: 'maxRevenue', label: 'Лучший по выручке', description: 'Максимальная выручка в модели, даже если запуск сложнее.', scenario: maxRevenue },
   ];
-  return { version: VERSION, startViews: START_VIEWS, simulationDays: SIMULATION_DAYS, staleAfterDays: 1, dailyViews: whole(START_VIEWS / SIMULATION_DAYS), inboxRate: INBOX_RATE, codewordShare: CODEWORD_SHARE, dailyChatCapacity: DAILY_CHAT_CAPACITY, manualChatCapacity: MANUAL_CHAT_CAPACITY, monthlyChatCapacity: MANUAL_CHAT_CAPACITY, dailyCallCapacity: DAILY_CALL_CAPACITY, manualCallCapacity: MANUAL_CALL_CAPACITY, monthlyCallCapacity: MANUAL_CALL_CAPACITY, productPrice, evaluatedVariants: scenarios.length, scenarios, choices, alternatives: choices.slice(1).map(choice => choice.scenario), selectedChoiceKey: choices.find(choice => choice.scenario.id === recommended.id)?.key || choices[0].key, selectedScenarioId: recommended.id, best: recommended };
+  return { version: VERSION, startViews: START_VIEWS, simulationDays: SIMULATION_DAYS, staleAfterDays: 1, dailyViews: whole(START_VIEWS / SIMULATION_DAYS), inboxRate: INBOX_RATE, codewordShare: CODEWORD_SHARE, dailyChatCapacity: DAILY_CHAT_CAPACITY, manualChatCapacity: MANUAL_CHAT_CAPACITY, monthlyChatCapacity: MANUAL_CHAT_CAPACITY, dailyCallCapacity: DAILY_CALL_CAPACITY, manualCallCapacity: MANUAL_CALL_CAPACITY, monthlyCallCapacity: MANUAL_CALL_CAPACITY, productPrice, evaluatedVariants: summarizedScenarios.length, scenarios: summarizedScenarios, choices, alternatives: choices.slice(1).map(choice => choice.scenario), selectedChoiceKey: choices.find(choice => choice.scenario.id === recommended.id)?.key || choices[0].key, selectedScenarioId: recommended.id, best: recommended };
 }
 
 module.exports = { optimiseFunnel, VERSION };
