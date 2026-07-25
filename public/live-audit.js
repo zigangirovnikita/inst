@@ -14,10 +14,10 @@
     ['review-05.png', 'Отзыв об экологичном подходе специалиста'], ['review-06.png', 'Отзыв о точках роста и пути к ним'],
   ];
   const defaultAuditPoints = [
-    'Контент-план на 7 дней на основе залетевших Reels прямых конкурентов в вашей тематике.',
-    'Поэтапную воронку и офферы каждого этапа под выбранный маршрут.',
-    'Кто из аудитории будет покупать, кто не будет, и как привлекать нужных людей.',
-    'Сколько времени и затрат потребует реализация, чтобы не платить за лишнее и не собирать неэффективные шаги.',
+    'Подготовит 7-дневный контент-план на основе успешных рилс русских и зарубежных экспертов в вашей нише.',
+    'Опишет поэтапную воронку и офферы каждого этапа под выбранный маршрут.',
+    'Определит, кто из аудитории будет покупать, кто не будет, и как привлекать нужных людей.',
+    'Оценит, сколько времени и затрат потребует реализация, чтобы не платить за лишнее и не собирать неэффективные шаги.',
   ];
 
   function ensureStyles() {
@@ -38,16 +38,38 @@
     return '<div class="media-grid ' + type + '">' + images.map(([name, alt]) => '<button class="media-button" data-image="' + esc(asset(name)) + '" data-alt="' + esc(alt) + '"><img src="' + esc(asset(name)) + '" alt="' + esc(alt) + '" width="800" height="1000" loading="lazy"></button>').join('') + '</div>';
   }
 
+  function cleanText(value) {
+    return String(value || '').trim().replace(/\s+/g, ' ').replace(/[.;:]+$/g, '');
+  }
+
+  function competitorGroup(points) {
+    const fromBullet = cleanText(points?.[0]).match(/адаптировать темы под ([^.]+)$/i)?.[1];
+    const answers = state.analysis?.answers || state.answers || {};
+    return cleanText(fromBullet || answers.audience || answers.niche || 'экспертов в вашей нише').toLowerCase();
+  }
+
+  function actionPoint(value) {
+    const text = cleanText(value);
+    return text
+      .replace(/^подготовить\b/i, 'Подготовит')
+      .replace(/^описать\b/i, 'Опишет')
+      .replace(/^определить\b/i, 'Определит')
+      .replace(/^оценить\b/i, 'Оценит') + '.';
+  }
+
   function auditPoints() {
     const fromPlan = state.analysis?.growthPlan?.liveReview?.bullets;
     const selectedRoute = state.analysis?.funnelPlan?.best?.title;
-    if (Array.isArray(fromPlan) && fromPlan.length >= 3) return fromPlan;
-    return selectedRoute ? [
-      'Контент-план на 7 дней на основе залетевших Reels прямых конкурентов в вашей тематике.',
-      'Поэтапную воронку и офферы каждого этапа: ' + selectedRoute + '.',
-      'Кто из вашей аудитории будет покупать, кто не будет, и как привлекать нужных людей.',
-      'Сколько времени и затрат потребует реализация, чтобы не платить за лишнее и не собирать неэффективные шаги.',
+    const sourcePoints = Array.isArray(fromPlan) && fromPlan.length >= 3 ? fromPlan : selectedRoute ? [
+      defaultAuditPoints[0],
+      'Опишет поэтапную воронку и офферы каждого этапа: ' + selectedRoute + '.',
+      'Определит, кто из вашей аудитории будет покупать, кто не будет, и как привлекать нужных людей.',
+      defaultAuditPoints[3],
     ] : defaultAuditPoints;
+    return [
+      'Подготовит 7-дневный контент-план на основе успешных рилс русских и зарубежных ' + competitorGroup(sourcePoints) + '.',
+      ...sourcePoints.slice(1, 4).map(actionPoint),
+    ];
   }
 
   function bindLightbox() {
@@ -61,7 +83,7 @@
 
   window.renderLiveAudit = function renderLiveAudit() {
     ensureStyles();
-    app.innerHTML = '<section class="screen"><button class="back" id="back-to-plan">← К плану на 30 дней</button><button class="live-audit-hero" data-image="' + asset('hero-online-product.png') + '" data-alt="Никита — маркетолог и автор разбора"><img src="' + asset('hero-online-product.png') + '" alt="Никита — маркетолог и автор разбора" width="800" height="450" fetchpriority="high"></button><article class="live-panel"><h1>50-минутный живой разбор</h1><p>На созвоне разберём выбранную воронку и соберём практичные решения для контента, офферов и следующего шага к продаже.</p><h2>Что Никита сделает на разборе</h2><ol class="live-points">' + auditPoints().map(point => '<li>' + esc(point) + '</li>').join('') + '</ol></article><article class="live-panel"><h2>Кейсы и результаты</h2><p class="muted">Нажмите на картинку, чтобы рассмотреть её подробнее.</p>' + gallery(cases, 'cases') + '</article><article class="live-panel"><h2>Что люди говорят после разбора</h2>' + gallery(reviews, 'reviews') + '</article><article class="live-urgency"><h2>За 50 минут вы получите готовые решения, после которых не придется тратить лишние деньги и энергию</h2><p>Оставьте заявку сейчас, чтобы не потерять еще несколько месяцев на поиски оптимальных решений, слив заявок и оплат</p><button class="primary" id="open-lead-form">Оставить заявку на разбор</button></article></section>';
+    app.innerHTML = '<section class="screen"><button class="back" id="back-to-plan">← К плану на 30 дней</button><button class="live-audit-hero" data-image="' + asset('hero-online-product.png') + '" data-alt="Никита — маркетолог и автор разбора"><img src="' + asset('hero-online-product.png') + '" alt="Никита — маркетолог и автор разбора" width="800" height="450" fetchpriority="high"></button><article class="live-panel"><h1>50-минутный живой разбор</h1><p>На созвоне разберём выбранную воронку и соберём практичные решения для контента, офферов и следующего шага к продаже.</p><h2>Что Никита сделает на разборе для вас</h2><ol class="live-points">' + auditPoints().map(point => '<li>' + esc(point) + '</li>').join('') + '</ol></article><article class="live-panel"><h2>Кейсы и результаты</h2><p class="muted">Нажмите на картинку, чтобы рассмотреть её подробнее.</p>' + gallery(cases, 'cases') + '</article><article class="live-panel"><h2>Что люди говорят после разбора</h2>' + gallery(reviews, 'reviews') + '</article><article class="live-urgency"><h2>За 50 минут вы получите готовые решения, после которых не придется тратить лишние деньги и энергию</h2><p>Оставьте заявку сейчас, чтобы не потерять еще несколько месяцев на поиски оптимальных решений, слив заявок и оплат</p><button class="primary" id="open-lead-form">Оставить заявку на разбор</button></article></section>';
     scrollPageTop();
     bindLightbox();
     document.querySelector('#back-to-plan').onclick = () => { state.screen = 'growthPlan'; persist(); render(); };

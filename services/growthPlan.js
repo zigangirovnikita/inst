@@ -1,6 +1,6 @@
 const POLZA_URL = 'https://api.polza.ai/api/v1/chat/completions';
 const MODEL = 'google/gemini-3.5-flash-lite';
-const VERSION = 14;
+const VERSION = 15;
 
 function parseJson(content) {
   const text = String(content || '').trim().replace(/^\`\`\`json\s*|\s*\`\`\`$/g, '');
@@ -57,11 +57,12 @@ Examples of the required specificity and format (adapt them; do not copy them bl
 
 Do not reveal a full content plan, product ladder, finished offer, funnel copy, or lead magnet. Those are intentionally reserved for a live diagnostic. Do not promise sales or revenue. The tone is direct, useful, and confident, not promotional.
 
-For liveReview, give exactly FOUR concrete bullets adapted to the selected funnel and the user's business. The four bullets MUST follow these skeletons:
-1) Prepare a 7-day content plan based on successful competitor Reels; name the user's adapted content theme or angle from the supplied niche/product/audience.
-2) Describe the funnel stage sequence and the offers/scripts needed at each stage; name the selected route stages, for example Reels, code word, AI bot, lesson, tripwire, Direct messages, application, call.
-3) Define which target-audience segment will buy, which segment will not buy, and how to attract/qualify the buying segment; adapt this to the user's declared target audience.
-4) Estimate implementation time and required costs/resources so the user does not pay for unnecessary tools or build ineffective steps.
+For liveReview, give exactly FOUR concrete bullets adapted to the selected funnel and the user's business. Write every bullet from the position "what Nikita will do on the live review" using Russian third-person future verbs: "Подготовит", "Опишет", "Определит", "Оценит".
+The four bullets MUST follow these skeletons:
+1) "Подготовит 7-дневный контент-план на основе успешных рилс русских и зарубежных [competitor category]." The competitor category MUST be named from the supplied niche/product/audience, for example "психологов по отношениям". Do not write generic "конкурентов" if a concrete category can be derived.
+2) "Опишет..." the funnel stage sequence and the offers/scripts needed at each stage; name the selected route stages, for example Reels, code word, AI bot, lesson, tripwire, Direct messages, application, call.
+3) "Определит..." which target-audience segment will buy, which segment will not buy, and how to attract/qualify the buying segment; adapt this to the user's declared target audience.
+4) "Оценит..." implementation time and required costs/resources so the user does not pay for unnecessary tools or build ineffective steps.
 
 Source data:
 ${JSON.stringify(source)}
