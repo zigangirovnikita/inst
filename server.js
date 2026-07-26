@@ -125,7 +125,7 @@ async function maybeStartErrorAnalysis(analysisId) {
 }
 
 function areAnswersComplete(answers) {
-  return ['niche', 'product', 'price', 'audience', 'name'].every(key => typeof answers?.[key] === 'string' && answers[key].trim());
+  return ['niche', 'product', 'price', 'audience', 'name'].every(key => typeof answers?.[key] === 'string' && answers[key].trim()) && /^\d+$/.test(answers.price.trim());
 }
 
 function sendJson(res, status, data) {
@@ -151,7 +151,7 @@ function canStartAnalysis(req) {
 }
 
 function hasAdminAccess(req, requestUrl) {
-  if (!ADMIN_TOKEN && (!ADMIN_LOGIN || !ADMIN_PASSWORD)) return true;
+  if (!ADMIN_TOKEN && (!ADMIN_LOGIN || !ADMIN_PASSWORD)) return false;
   const auth = req.headers.authorization || '';
   if (ADMIN_LOGIN && ADMIN_PASSWORD && auth.startsWith('Basic ')) {
     const decoded = Buffer.from(auth.slice(6), 'base64').toString('utf8');
@@ -160,6 +160,7 @@ function hasAdminAccess(req, requestUrl) {
     const password = decoded.slice(separator + 1);
     if (login === ADMIN_LOGIN && password === ADMIN_PASSWORD) return true;
   }
+  if (!ADMIN_TOKEN) return false;
   return req.headers['x-admin-token'] === ADMIN_TOKEN || requestUrl.searchParams.get('token') === ADMIN_TOKEN;
 }
 
@@ -167,6 +168,21 @@ function requireAdmin(req, res, requestUrl) {
   if (hasAdminAccess(req, requestUrl)) return false;
   res.setHeader('www-authenticate', 'Basic realm="Instagram audit admin", charset="UTF-8"');
   sendJson(res, 401, { error: 'Нужен доступ администратора.' });
+  return true;
+}
+
+function requestClientId(req, requestUrl, body = null) {
+  return String(req.headers['x-client-id'] || requestUrl.searchParams.get('clientId') || body?.clientId || '').slice(0, 80);
+}
+
+function requireAnalysisAccess(req, res, requestUrl, analysis, body = null) {
+  if (!analysis) {
+    sendJson(res, 404, { error: 'Анализ не найден.' });
+    return true;
+  }
+  if (!analysis.clientId) return false;
+  if (requestClientId(req, requestUrl, body) === analysis.clientId) return false;
+  sendJson(res, 403, { error: 'Нет доступа к этому анализу.' });
   return true;
 }
 
@@ -385,7 +401,8 @@ const server = http.createServer(async (req, res) => {
   }
   if (req.method === 'GET' && requestUrl.pathname.startsWith('/api/analyses/')) {
     const analysis = getAnalysis(requestUrl.pathname.slice('/api/analyses/'.length));
-    return analysis ? sendJson(res, 200, analysis) : sendJson(res, 404, { error: 'Анализ не найден.' });
+    if (requireAnalysisAccess(req, res, requestUrl, analysis)) return;
+    return sendJson(res, 200, analysis);
   }
   if (req.method === 'POST' && requestUrl.pathname === '/api/analyses') {
     try {
@@ -403,9 +420,9 @@ const server = http.createServer(async (req, res) => {
     try {
       const analysisId = requestUrl.pathname.split('/')[3];
       const analysis = getAnalysis(analysisId);
-      if (!analysis) throw new Error('Анализ не найден.');
-      if (!areAnswersComplete(analysis.answers)) throw new Error('Сначала ответь на вопросы о продукте и аудитории.');
       const body = await readJson(req).catch(() => ({}));
+      if (requireAnalysisAccess(req, res, requestUrl, analysis, body)) return;
+      if (!areAnswersComplete(analysis.answers)) throw new Error('Сначала ответь на вопросы о продукте и аудитории.');
       const plan = analysis.funnelPlan?.version === FUNNEL_VERSION ? analysis.funnelPlan : optimiseFunnel(analysis.answers);
       const selected = plan.choices?.find(choice => choice.key === body.selectedChoiceKey || choice.scenario.id === body.selectedScenarioId);
       if (selected) {
@@ -423,7 +440,7 @@ const server = http.createServer(async (req, res) => {
     try {
       const analysisId = requestUrl.pathname.split('/')[3];
       const analysis = getAnalysis(analysisId);
-      if (!analysis) throw new Error('Анализ не найден.');
+      if (requireAnalysisAccess(req, res, requestUrl, analysis)) return;
       if (analysis.errorStatus !== 'ready' || !analysis.funnelPlan) throw new Error('Сначала дождись анализа ошибок и расчёта воронки.');
       if (analysis.growthPlan?.version === GROWTH_PLAN_VERSION && analysis.growthPlan?.selectedScenarioId === analysis.funnelPlan.selectedScenarioId) return sendJson(res, 200, analysis.growthPlan);
       const { log } = createAnalysisLogger(analysis.profileUrl, analysisId);
@@ -436,8 +453,8 @@ const server = http.createServer(async (req, res) => {
     try {
       const analysisId = requestUrl.pathname.split('/')[3];
       const analysis = getAnalysis(analysisId);
-      if (!analysis) throw new Error('Анализ не найден.');
       const body = await readJson(req);
+      if (requireAnalysisAccess(req, res, requestUrl, analysis, body)) return;
       if (!validLeadText(body.name, 120) || !validLeadText(body.contact, 180)) throw new Error('Укажи имя и Telegram или номер телефона.');
       if (String(body.website || '').trim()) throw new Error('Не удалось отправить заявку.');
       const lead = {
@@ -458,8 +475,8 @@ const server = http.createServer(async (req, res) => {
   }
   if (req.method === 'POST' && requestUrl.pathname.startsWith('/api/analyses/') && requestUrl.pathname.endsWith('/answers')) {
     try {
-      const analysisId = requestUrl.pathname.split('/')[3]; const analysis = getAnalysis(analysisId); if (!analysis) throw new Error('Анализ не найден.');
-      const { answers } = await readJson(req); if (!areAnswersComplete(answers)) throw new Error('Ответь на все пять вопросов.');
+      const analysisId = requestUrl.pathname.split('/')[3]; const analysis = getAnalysis(analysisId);
+      const { answers, clientId } = await readJson(req); if (requireAnalysisAccess(req, res, requestUrl, analysis, { clientId })) return; if (!areAnswersComplete(answers)) throw new Error('Ответь на все пять вопросов.');
       saveAnswers(analysisId, answers); const { log } = createAnalysisLogger(analysis.profileUrl, analysisId); log('questionnaire_completed'); void maybeStartErrorAnalysis(analysisId);
       return sendJson(res, 200, getAnalysis(analysisId));
     } catch (error) { return sendJson(res, 400, { error: error.message || 'Не удалось сохранить ответы.' }); }
